@@ -9,12 +9,13 @@ import (
 	"github.com/janhuddel/metrics-agent/internal/modules/demo"
 )
 
+// TestDemoModulePublishesMetrics tests that the demo module publishes metrics correctly.
 func TestDemoModulePublishesMetrics(t *testing.T) {
 	ch := make(chan metrics.Metric, 1)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	// Modul starten (asynchron)
+	// Start module asynchronously
 	go func() {
 		_ = demo.Run(ctx, ch)
 	}()

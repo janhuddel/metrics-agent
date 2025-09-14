@@ -7,11 +7,12 @@ import (
 	"github.com/janhuddel/metrics-agent/internal/metrics"
 )
 
+// TestToLineProtocol_IntAndTags tests Line Protocol conversion with integer fields and tags.
 func TestToLineProtocol_IntAndTags(t *testing.T) {
 	m := metrics.Metric{
 		Name: "cpu_usage",
 		Tags: map[string]string{
-			"host":   "my host", // enthält Leerzeichen → muss escaped werden
+			"host":   "my host", // contains spaces → must be escaped
 			"vendor": "demo",
 		},
 		Fields: map[string]interface{}{
@@ -31,6 +32,7 @@ func TestToLineProtocol_IntAndTags(t *testing.T) {
 	}
 }
 
+// TestToLineProtocol_StringField tests Line Protocol conversion with string fields.
 func TestToLineProtocol_StringField(t *testing.T) {
 	m := metrics.Metric{
 		Name:   "demo_metric",

@@ -1,3 +1,5 @@
+// Package demo provides a demonstration metric collection module.
+// It generates sample metrics at regular intervals for testing purposes.
 package demo
 
 import (
@@ -9,14 +11,14 @@ import (
 	"github.com/janhuddel/metrics-agent/internal/metrics"
 )
 
-// Run erzeugt alle 10 Sekunden eine Demo-Metrik
-// und sendet sie über den Channel an den Supervisor.
+// Run generates demo metrics every 5 seconds and sends them through the channel.
+// It runs until the context is cancelled.
 func Run(ctx context.Context, ch chan<- metrics.Metric) error {
 	host, _ := os.Hostname()
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
 
-	// Erste Metrik direkt beim Start
+	// Send first metric immediately on start
 	ch <- makeMetric(host)
 
 	for {
@@ -29,6 +31,7 @@ func Run(ctx context.Context, ch chan<- metrics.Metric) error {
 	}
 }
 
+// makeMetric creates a demo metric with random values.
 func makeMetric(host string) metrics.Metric {
 	return metrics.Metric{
 		Name: "demo_metric",

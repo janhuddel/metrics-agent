@@ -1,3 +1,6 @@
+// Package supervisor provides process management for metric collection modules.
+// It can run modules either as subprocesses or in-process, with automatic
+// restart capabilities and graceful shutdown handling.
 package supervisor
 
 import (
@@ -13,17 +16,16 @@ import (
 	"time"
 
 	"github.com/janhuddel/metrics-agent/internal/metrics"
-	"github.com/janhuddel/metrics-agent/internal/modules/demo"
+	"github.com/janhuddel/metrics-agent/internal/modules"
 )
 
-// VendorSpec beschreibt ein Modul, das überwacht werden soll.
+// VendorSpec describes a module that should be monitored and managed.
 type VendorSpec struct {
-	Name      string
-	Args      []string // Platzhalter für spätere Parameter
-	InProcess bool     // Wenn true, wird das Modul in-process gestartet
+	Name string   // Module name
+	Args []string // Command line arguments (placeholder for future use)
 }
 
-// procState hält den Zustand eines gestarteten Moduls.
+// procState holds the state of a running module process.
 type procState struct {
 	spec         VendorSpec
 	cmd          *exec.Cmd
@@ -32,8 +34,8 @@ type procState struct {
 	backoff      time.Duration
 	startedAt    time.Time
 	restarts     int
-	stopping     bool // finaler Stopp
-	restarting   bool // Neustart (SIGHUP)
+	stopping     bool // indicates final stop (no restart)
+	restarting   bool // indicates restart requested (SIGHUP)
 	stdoutPrefix string
 	stderrPrefix string
 	// In-process worker state
@@ -42,24 +44,30 @@ type procState struct {
 	inProcessDone   chan struct{}
 }
 
-// Supervisor verwaltet mehrere Module (Subprozesse).
-// Er startet sie, überwacht sie und startet sie ggf. neu.
+// Supervisor manages multiple modules (subprocesses or in-process workers).
+// It starts them, monitors them, and restarts them if they crash.
 type Supervisor struct {
-	mu     sync.Mutex
-	procs  map[string]*procState
-	events chan string // Events nach außen
+	mu        sync.Mutex
+	procs     map[string]*procState
+	events    chan string // Events sent to external consumers
+	inProcess bool        // If true, all modules are started in-process
 }
 
-func New() *Supervisor {
+// New creates a new Supervisor instance.
+// If inProcess is true, modules will be run in-process instead of as subprocesses.
+func New(inProcess bool) *Supervisor {
 	return &Supervisor{
-		procs:  make(map[string]*procState),
-		events: make(chan string, 64),
+		procs:     make(map[string]*procState),
+		events:    make(chan string, 64),
+		inProcess: inProcess,
 	}
 }
 
+// Events returns a read-only channel for receiving supervisor events.
 func (s *Supervisor) Events() <-chan string { return s.events }
 
-// Start startet ein Modul (als Subprozess).
+// Start starts a module (as subprocess or in-process).
+// It returns an error if the module is already running.
 func (s *Supervisor) Start(ctx context.Context, spec VendorSpec) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -75,12 +83,12 @@ func (s *Supervisor) Start(ctx context.Context, spec VendorSpec) error {
 	}
 	s.procs[spec.Name] = ps
 
-	// runLoop startet den Prozess und respawnt bei Abstürzen.
+	// Start the run loop which manages the process and handles restarts
 	go s.runLoop(ctx, ps)
 	return nil
 }
 
-// RestartAll beendet und startet alle Module neu.
+// RestartAll stops and restarts all modules.
 func (s *Supervisor) RestartAll(ctx context.Context) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -89,7 +97,7 @@ func (s *Supervisor) RestartAll(ctx context.Context) {
 	}
 }
 
-// StopAll beendet alle Module.
+// StopAll stops all modules gracefully.
 func (s *Supervisor) StopAll(ctx context.Context) {
 	var wg sync.WaitGroup
 	s.mu.Lock()
@@ -104,7 +112,8 @@ func (s *Supervisor) StopAll(ctx context.Context) {
 	wg.Wait()
 }
 
-// runLoop startet ein Modul, überwacht es und startet es nach Absturz neu.
+// runLoop starts a module, monitors it, and restarts it after crashes.
+// It implements exponential backoff for restart attempts.
 func (s *Supervisor) runLoop(ctx context.Context, ps *procState) {
 	for {
 		if err := s.spawn(ctx, ps); err != nil {
@@ -114,42 +123,42 @@ func (s *Supervisor) runLoop(ctx context.Context, ps *procState) {
 		var err error
 		var uptime time.Duration
 
-		if ps.spec.InProcess {
-			// In-process worker: warten auf done channel
+		if s.inProcess {
+			// In-process worker: wait for done channel
 			select {
 			case <-ps.inProcessDone:
 				uptime = time.Since(ps.startedAt)
-				// In-process worker ist beendet
+				// In-process worker has finished
 			case <-ctx.Done():
 				return
 			}
 		} else {
-			// Subprocess: warten auf cmd.Wait()
+			// Subprocess: wait for cmd.Wait()
 			err = ps.cmd.Wait()
 			uptime = time.Since(ps.startedAt)
 		}
 
 		if ps.stopping {
-			// endgültiger Stopp
+			// Final stop requested
 			s.events <- fmt.Sprintf("%s stopped", ps.spec.Name)
 			return
 		}
 
 		if ps.restarting {
-			// Restart: Flag zurücksetzen, dann sofort neu starten (kein Backoff)
+			// Restart: reset flag and restart immediately (no backoff)
 			ps.restarting = false
 			s.events <- fmt.Sprintf("%s restarting (uptime=%s)", ps.spec.Name, uptime)
 			continue
 		}
 
-		// regulärer Exit (z. B. Crash)
+		// Regular exit (e.g., crash)
 		if err != nil {
 			s.events <- fmt.Sprintf("%s exited: %v (uptime=%s)", ps.spec.Name, err, uptime)
 		} else {
 			s.events <- fmt.Sprintf("%s exited normally (uptime=%s)", ps.spec.Name, uptime)
 		}
 
-		// Backoff-Strategie
+		// Implement exponential backoff strategy
 		if uptime > time.Minute {
 			ps.backoff = 1 * time.Second
 		} else {
@@ -170,17 +179,17 @@ func (s *Supervisor) runLoop(ctx context.Context, ps *procState) {
 	}
 }
 
-// spawn startet das eigentliche Modul als Subprozess oder in-process.
+// spawn starts the actual module as subprocess or in-process.
 func (s *Supervisor) spawn(ctx context.Context, ps *procState) error {
-	if ps.spec.InProcess {
+	if s.inProcess {
 		return s.spawnInProcess(ctx, ps)
 	}
 	return s.spawnSubprocess(ctx, ps)
 }
 
-// spawnSubprocess startet das Modul als Subprozess.
+// spawnSubprocess starts the module as a subprocess.
 func (s *Supervisor) spawnSubprocess(ctx context.Context, ps *procState) error {
-	// Wir starten das gleiche Binary mit -worker und -module.
+	// Start the same binary with -worker and -module flags
 	args := []string{"-worker", "-module", ps.spec.Name}
 	cmd := exec.Command(os.Args[0], args...)
 	cmd.Env = os.Environ()
@@ -194,9 +203,9 @@ func (s *Supervisor) spawnSubprocess(ctx context.Context, ps *procState) error {
 		return err
 	}
 
-	// Logs des Subprozesses → STDERR mit Prefix.
+	// Forward subprocess logs to stderr with prefix
 	go prefixCopy(ps.stderrPrefix, os.Stderr, stderr)
-	// Metriken (STDOUT) → transparent durchreichen.
+	// Forward metrics (stdout) transparently
 	go forwardLines(os.Stdout, stdout)
 
 	if err := cmd.Start(); err != nil {
@@ -211,16 +220,16 @@ func (s *Supervisor) spawnSubprocess(ctx context.Context, ps *procState) error {
 	return nil
 }
 
-// spawnInProcess startet das Modul in-process.
+// spawnInProcess starts the module in-process.
 func (s *Supervisor) spawnInProcess(ctx context.Context, ps *procState) error {
-	// Context für das in-process Modul
+	// Create context for the in-process module
 	ps.inProcessCtx, ps.inProcessCancel = context.WithCancel(ctx)
 	ps.inProcessDone = make(chan struct{})
 
-	// Channel für Metriken
+	// Create channel for metrics
 	metricCh := make(chan metrics.Metric, 100)
 
-	// Metriken-Serializer
+	// Start metric serializer goroutine
 	go func() {
 		for m := range metricCh {
 			line, err := m.ToLineProtocol()
@@ -228,23 +237,18 @@ func (s *Supervisor) spawnInProcess(ctx context.Context, ps *procState) error {
 				log.Printf("%sserialization error: %v", ps.stderrPrefix, err)
 				continue
 			}
-			fmt.Println(line) // direkt STDOUT
+			fmt.Println(line) // Write directly to stdout
 		}
 	}()
 
-	// Modul in separater Goroutine starten
+	// Start module in separate goroutine
 	go func() {
 		defer close(ps.inProcessDone)
 		defer close(metricCh)
 
-		// Modul-Dispatch
-		switch ps.spec.Name {
-		case "demo":
-			if err := demo.Run(ps.inProcessCtx, metricCh); err != nil {
-				log.Printf("%smodule error: %v", ps.stderrPrefix, err)
-			}
-		default:
-			log.Printf("%sunknown module: %s", ps.stderrPrefix, ps.spec.Name)
+		// Dispatch module through registry
+		if err := modules.Global.Run(ps.inProcessCtx, ps.spec.Name, metricCh); err != nil {
+			log.Printf("%smodule error: %v", ps.stderrPrefix, err)
 		}
 	}()
 
@@ -254,7 +258,7 @@ func (s *Supervisor) spawnInProcess(ctx context.Context, ps *procState) error {
 	return nil
 }
 
-// stop beendet ein Modul sanft (erst Interrupt, dann notfalls Kill).
+// stop gracefully stops a module (first interrupt, then kill if necessary).
 func (s *Supervisor) stop(ctx context.Context, ps *procState, restart bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -268,13 +272,13 @@ func (s *Supervisor) stop(ctx context.Context, ps *procState, restart bool) {
 		ps.stopping = true
 	}
 
-	if ps.spec.InProcess {
+	if s.inProcess {
 		// In-process worker: cancel context
 		if ps.inProcessCancel != nil {
 			ps.inProcessCancel()
 		}
 
-		// Warten auf Beendigung
+		// Wait for termination
 		done := make(chan struct{})
 		go func() {
 			if ps.inProcessDone != nil {
@@ -287,10 +291,10 @@ func (s *Supervisor) stop(ctx context.Context, ps *procState, restart bool) {
 		case <-ctx.Done():
 		case <-done:
 		case <-time.After(5 * time.Second):
-			// Timeout - in-process worker sollte sich beenden
+			// Timeout - in-process worker should terminate
 		}
 	} else {
-		// Subprocess: Signal senden
+		// Subprocess: send signal
 		if ps.cmd == nil || ps.cmd.Process == nil {
 			return
 		}
@@ -312,8 +316,8 @@ func (s *Supervisor) stop(ctx context.Context, ps *procState, restart bool) {
 	}
 }
 
-// prefixCopy liest Zeilen aus src und schreibt sie mit Prefix nach dst.
-// Wird für STDERR der Module genutzt.
+// prefixCopy reads lines from src and writes them with prefix to dst.
+// Used for stderr output from modules.
 func prefixCopy(prefix string, dst io.Writer, src io.Reader) {
 	sc := bufio.NewScanner(src)
 	for sc.Scan() {
@@ -325,8 +329,8 @@ func prefixCopy(prefix string, dst io.Writer, src io.Reader) {
 	}
 }
 
-// forwardLines leitet Zeilen aus src direkt an dst weiter.
-// Wird für STDOUT der Module genutzt (Metriken).
+// forwardLines forwards lines from src directly to dst.
+// Used for stdout from modules (metrics).
 func forwardLines(dst io.Writer, src io.Reader) {
 	sc := bufio.NewScanner(src)
 	bw := bufio.NewWriter(dst)
@@ -337,6 +341,7 @@ func forwardLines(dst io.Writer, src io.Reader) {
 	_ = bw.Flush()
 }
 
+// isBrokenPipe checks if an error is a broken pipe error.
 func isBrokenPipe(err error) bool {
 	return err != nil && strings.Contains(strings.ToLower(err.Error()), "broken pipe")
 }

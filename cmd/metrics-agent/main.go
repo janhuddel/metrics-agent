@@ -1,3 +1,7 @@
+// Package main implements the metrics-agent application.
+// It can run in two modes:
+// 1. Supervisor mode: Manages and monitors multiple metric collection modules
+// 2. Worker mode: Executes a specific metric collection module
 package main
 
 import (
@@ -12,75 +16,81 @@ import (
 	"time"
 
 	"github.com/janhuddel/metrics-agent/internal/metrics"
-	"github.com/janhuddel/metrics-agent/internal/modules/demo"
+	"github.com/janhuddel/metrics-agent/internal/modules"
 	"github.com/janhuddel/metrics-agent/internal/supervisor"
 )
 
 var (
-	// Flag, ob das Programm als Worker-Prozess läuft (von Supervisor gestartet).
+	// flagWorker indicates whether the program runs as a worker subprocess (started by supervisor)
 	flagWorker = flag.Bool("worker", false, "Run as worker subprocess")
-	// Modulname, der im Worker ausgeführt werden soll.
+	// flagModule specifies the module name to run in worker mode
 	flagModule = flag.String("module", "", "Module name to run in worker mode")
-	// Flag, um die Version anzuzeigen.
+	// flagVersion prints the version and exits
 	flagVersion = flag.Bool("version", false, "Print version and exit")
-	// Flag, um Module in-process zu starten (für Debugging).
+	// flagInProcess starts modules in-process instead of as subprocesses (for debugging)
 	flagInProcess = flag.Bool("inprocess", false, "Start workers in-process instead of as subprocesses")
 )
 
-// version kann beim Build mit -ldflags überschrieben werden.
+// version can be overridden at build time with -ldflags
 const version = "0.1.0"
 
+// main is the entry point of the metrics-agent application.
+// It initializes logging, parses command-line flags, and delegates to either
+// supervisor or worker mode based on the flags.
 func main() {
-	// Lognachrichten gehen auf STDERR.
-	// Hintergrund: STDOUT ist für Metriken reserviert (Line Protocol).
+	// Configure logging to stderr since stdout is reserved for metrics (Line Protocol)
 	log.SetOutput(os.Stderr)
 	log.SetFlags(log.LstdFlags | log.Lmicroseconds | log.Lmsgprefix)
 	log.SetPrefix("[metric-agent] ")
 
 	flag.Parse()
 
-	// Bei -version nur Version ausgeben und beenden.
+	// Handle version flag
 	if *flagVersion {
 		fmt.Fprintf(os.Stderr, "metric-agent %s (%s %s)\n", version, runtime.GOOS, runtime.GOARCH)
 		return
 	}
 
-	// Wenn -worker gesetzt: Worker-Modus starten.
+	// Determine execution mode
 	if *flagWorker {
 		runWorker(*flagModule)
 		return
 	}
 
-	// Ansonsten Supervisor-Modus starten.
+	// Default to supervisor mode
 	runSupervisor()
 }
 
-// runSupervisor ist der Hauptprozess. Er startet und überwacht die Module.
+// runSupervisor starts the main supervisor process that manages and monitors modules.
+// It creates a supervisor instance, starts all registered modules, and handles
+// system signals for graceful shutdown and restart operations.
 func runSupervisor() {
-	// Beispielkonfiguration: ein Modul
-	specs := []supervisor.VendorSpec{
-		{Name: "demo", InProcess: *flagInProcess},
+	// Create module specifications based on registered modules
+	var specs []supervisor.VendorSpec
+	for _, moduleName := range modules.Global.List() {
+		specs = append(specs, supervisor.VendorSpec{
+			Name: moduleName,
+		})
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	sup := supervisor.New()
+	sup := supervisor.New(*flagInProcess)
 
-	// Signale: TERM/INT → Shutdown; HUP → Restart
+	// Set up signal handling: TERM/INT → Shutdown; HUP → Restart
 	sigCh := make(chan os.Signal, 2)
 	signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGINT, syscall.SIGHUP)
 
-	// Module starten
-	for _, s := range specs {
-		if err := sup.Start(ctx, s); err != nil {
-			log.Printf("[supervisor] start %q failed: %v", s.Name, err)
+	// Start all modules
+	for _, spec := range specs {
+		if err := sup.Start(ctx, spec); err != nil {
+			log.Printf("[supervisor] failed to start module %q: %v", spec.Name, err)
 		}
 	}
 
-	// Kontroll-Flag für die Schleife
+	// Main event loop
 	shuttingDown := false
-
 	for !shuttingDown {
 		select {
 		case sig := <-sigCh:
@@ -97,27 +107,28 @@ func runSupervisor() {
 		}
 	}
 
-	// Shutdown-Block → wird garantiert nach Verlassen der Schleife ausgeführt
+	// Graceful shutdown with timeout
 	shCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	sup.StopAll(shCtx)
 	log.Printf("[supervisor] exit")
 }
 
-// runWorker startet ein bestimmtes Modul direkt.
-// Er wird vom Supervisor-Prozess als Subprozess aufgerufen.
+// runWorker starts a specific module directly.
+// It is called by the supervisor process as a subprocess.
 func runWorker(moduleName string) {
 	if moduleName == "" {
-		log.Fatalf("[worker] missing -module")
+		log.Fatalf("[worker] missing -module flag")
 	}
 
-	// Channel für Metriken (unbuffered oder leicht gepuffert)
+	// Create buffered channel for metrics
 	metricCh := make(chan metrics.Metric, 100)
 
-	// Context für Shutdown
+	// Set up context for graceful shutdown
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
+	// Handle shutdown signals
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGINT)
 	go func() {
@@ -125,7 +136,7 @@ func runWorker(moduleName string) {
 		cancel()
 	}()
 
-	// Serializer: Metriken auf STDOUT schreiben
+	// Start metric serializer goroutine
 	go func() {
 		for m := range metricCh {
 			line, err := m.ToLineProtocol()
@@ -133,20 +144,15 @@ func runWorker(moduleName string) {
 				log.Printf("[worker] serialization error: %v", err)
 				continue
 			}
-			fmt.Println(line) // direkt STDOUT
+			fmt.Println(line) // Write directly to stdout
 		}
 	}()
 
-	// Modul-Dispatch
-	switch moduleName {
-	case "demo":
-		if err := demo.Run(ctx, metricCh); err != nil {
-			log.Fatalf("[worker] demo module error: %v", err)
-		}
-	default:
-		log.Fatalf("[worker] unknown module: %s", moduleName)
+	// Run the specified module
+	if err := modules.Global.Run(ctx, moduleName, metricCh); err != nil {
+		log.Fatalf("[worker] module %s error: %v", moduleName, err)
 	}
 
-	// Kanal schließen, wenn Modul beendet ist
+	// Close channel when module finishes
 	close(metricCh)
 }
