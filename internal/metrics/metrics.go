@@ -5,6 +5,7 @@ package metrics
 import (
 	"fmt"
 	"log"
+	"sort"
 	"strings"
 	"time"
 )
@@ -28,24 +29,37 @@ func (m Metric) ToLineProtocol() (string, error) {
 	// Write measurement name
 	sb.WriteString(escape(m.Name))
 
-	// Write tags
-	for k, v := range m.Tags {
-		sb.WriteByte(',')
-		sb.WriteString(escape(k))
-		sb.WriteByte('=')
-		sb.WriteString(escape(v))
+	// Write tags in alphabetical order
+	if len(m.Tags) > 0 {
+		tagKeys := make([]string, 0, len(m.Tags))
+		for k := range m.Tags {
+			tagKeys = append(tagKeys, k)
+		}
+		sort.Strings(tagKeys)
+
+		for _, k := range tagKeys {
+			sb.WriteByte(',')
+			sb.WriteString(escape(k))
+			sb.WriteByte('=')
+			sb.WriteString(escape(m.Tags[k]))
+		}
 	}
 
-	// Write fields
-	first := true
+	// Write fields in alphabetical order
 	sb.WriteByte(' ')
-	for k, v := range m.Fields {
-		if !first {
+	fieldKeys := make([]string, 0, len(m.Fields))
+	for k := range m.Fields {
+		fieldKeys = append(fieldKeys, k)
+	}
+	sort.Strings(fieldKeys)
+
+	for i, k := range fieldKeys {
+		if i > 0 {
 			sb.WriteByte(',')
 		}
 		sb.WriteString(escape(k))
 		sb.WriteByte('=')
-		switch val := v.(type) {
+		switch val := m.Fields[k].(type) {
 		case int, int32, int64:
 			sb.WriteString(fmt.Sprintf("%di", val))
 		case float32, float64:
@@ -62,7 +76,6 @@ func (m Metric) ToLineProtocol() (string, error) {
 		default:
 			return "", fmt.Errorf("unsupported field type %T", val)
 		}
-		first = false
 	}
 
 	// Write timestamp in nanoseconds

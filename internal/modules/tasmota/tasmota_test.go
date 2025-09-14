@@ -128,14 +128,10 @@ func TestSensorDataProcessing(t *testing.T) {
 		MD:  "Nous A1T",
 	}
 
-	// Sample sensor data
+	// Sample sensor data - only ENERGY sensors are currently processed
 	sensorData := map[string]interface{}{
-		"DS18B20": map[string]interface{}{
-			"Temperature": 22.5,
-		},
-		"DHT22": map[string]interface{}{
-			"Temperature": 23.1,
-			"Humidity":    45.2,
+		"ENERGY": map[string]interface{}{
+			"Power": 150.5,
 		},
 	}
 
@@ -168,21 +164,181 @@ func TestSensorDataProcessing(t *testing.T) {
 	}
 done:
 
-	// Verify we got metrics for both sensors
-	if len(metrics) < 3 { // At least 3 metrics: DS18B20.Temperature, DHT22.Temperature, DHT22.Humidity
-		t.Errorf("Expected at least 3 metrics, got %d", len(metrics))
+	// Verify we got exactly 1 metric for ENERGY sensor
+	if len(metrics) != 1 {
+		t.Errorf("Expected 1 metric for ENERGY sensor, got %d", len(metrics))
 	}
 
 	// Verify metric structure
-	for _, metric := range metrics {
-		if metric.Name != "tasmota_sensor" {
-			t.Errorf("Expected metric name 'tasmota_sensor', got '%s'", metric.Name)
+	if len(metrics) > 0 {
+		metric := metrics[0]
+		if metric.Name != "electricity" {
+			t.Errorf("Expected metric name 'electricity', got '%s'", metric.Name)
 		}
 		if metric.Tags["device"] != device.T {
 			t.Errorf("Expected device tag '%s', got '%s'", device.T, metric.Tags["device"])
 		}
-		if metric.Tags["sensor_type"] == "" {
-			t.Error("Expected sensor_type tag to be set")
+		if metric.Tags["vendor"] != "tasmota" {
+			t.Errorf("Expected vendor tag 'tasmota', got '%s'", metric.Tags["vendor"])
+		}
+		if metric.Fields["power"] != 150.5 {
+			t.Errorf("Expected power value 150.5, got %v", metric.Fields["power"])
 		}
 	}
+}
+
+// TestEnergySensorPowerArrayHandling tests processing of ENERGY sensor data with Power as array.
+func TestEnergySensorPowerArrayHandling(t *testing.T) {
+	device := &tasmota.DeviceInfo{
+		T:   "tasmota_6886BC",
+		DN:  "test-device",
+		HN:  "tasmota-6886BC-1234",
+		IP:  "192.168.1.100",
+		MAC: "1234566886BC",
+		MD:  "Test Module",
+	}
+
+	// Test case 1: Power as single float64 value
+	t.Run("SinglePowerValue", func(t *testing.T) {
+		sensorData := map[string]interface{}{
+			"ENERGY": map[string]interface{}{
+				"Power": 150.5,
+			},
+		}
+
+		ch := make(chan metrics.Metric, 10)
+		config := tasmota.Config{
+			Broker:   "tcp://localhost:1883",
+			ClientID: "test-client",
+			Timeout:  5 * time.Second,
+		}
+		module := tasmota.NewTasmotaModule(config)
+		module.SetMetricsChannel(ch)
+
+		module.ProcessSensorData(device, sensorData)
+
+		// Collect metrics
+		var metrics []metrics.Metric
+		timeout := time.After(1 * time.Second)
+
+		for {
+			select {
+			case metric := <-ch:
+				metrics = append(metrics, metric)
+			case <-timeout:
+				goto done1
+			}
+		}
+	done1:
+
+		// Should have exactly 1 metric
+		if len(metrics) != 1 {
+			t.Errorf("Expected 1 metric for single power value, got %d", len(metrics))
+		}
+
+		if len(metrics) > 0 {
+			metric := metrics[0]
+			if metric.Name != "electricity" {
+				t.Errorf("Expected metric name 'electricity', got '%s'", metric.Name)
+			}
+			if metric.Fields["power"] != 150.5 {
+				t.Errorf("Expected power value 150.5, got %v", metric.Fields["power"])
+			}
+			if metric.Tags["power_index"] != "" {
+				t.Error("Expected no power_index tag for single value")
+			}
+		}
+	})
+
+	// Test case 2: Power as array of float64 values
+	t.Run("PowerArray", func(t *testing.T) {
+		sensorData := map[string]interface{}{
+			"ENERGY": map[string]interface{}{
+				"Power": []interface{}{100.0, 200.5, 75.3},
+			},
+		}
+
+		ch := make(chan metrics.Metric, 10)
+		config := tasmota.Config{
+			Broker:   "tcp://localhost:1883",
+			ClientID: "test-client",
+			Timeout:  5 * time.Second,
+		}
+		module := tasmota.NewTasmotaModule(config)
+		module.SetMetricsChannel(ch)
+
+		module.ProcessSensorData(device, sensorData)
+
+		// Collect metrics
+		var metrics []metrics.Metric
+		timeout := time.After(1 * time.Second)
+
+		for {
+			select {
+			case metric := <-ch:
+				metrics = append(metrics, metric)
+			case <-timeout:
+				goto done2
+			}
+		}
+	done2:
+
+		// Should have exactly 3 metrics (one for each array element)
+		if len(metrics) != 3 {
+			t.Errorf("Expected 3 metrics for power array, got %d", len(metrics))
+		}
+
+		// Verify each metric
+		expectedValues := []float64{100.0, 200.5, 75.3}
+		for i, metric := range metrics {
+			if metric.Name != "electricity" {
+				t.Errorf("Expected metric name 'electricity', got '%s'", metric.Name)
+			}
+			if metric.Fields["power"] != expectedValues[i] {
+				t.Errorf("Expected power value %v at index %d, got %v", expectedValues[i], i, metric.Fields["power"])
+			}
+			if metric.Tags["power_index"] != fmt.Sprintf("%d", i) {
+				t.Errorf("Expected power_index tag '%d', got '%s'", i, metric.Tags["power_index"])
+			}
+		}
+	})
+
+	// Test case 3: Power field missing
+	t.Run("MissingPowerField", func(t *testing.T) {
+		sensorData := map[string]interface{}{
+			"ENERGY": map[string]interface{}{
+				"Voltage": 230.0,
+			},
+		}
+
+		ch := make(chan metrics.Metric, 10)
+		config := tasmota.Config{
+			Broker:   "tcp://localhost:1883",
+			ClientID: "test-client",
+			Timeout:  5 * time.Second,
+		}
+		module := tasmota.NewTasmotaModule(config)
+		module.SetMetricsChannel(ch)
+
+		module.ProcessSensorData(device, sensorData)
+
+		// Collect metrics
+		var metrics []metrics.Metric
+		timeout := time.After(1 * time.Second)
+
+		for {
+			select {
+			case metric := <-ch:
+				metrics = append(metrics, metric)
+			case <-timeout:
+				goto done3
+			}
+		}
+	done3:
+
+		// Should have no metrics when Power field is missing
+		if len(metrics) != 0 {
+			t.Errorf("Expected 0 metrics when Power field is missing, got %d", len(metrics))
+		}
+	})
 }

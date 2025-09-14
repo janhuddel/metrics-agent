@@ -78,8 +78,14 @@ func (tm *TasmotaModule) connect() error {
 	opts.SetPassword(tm.config.Password)
 	opts.SetConnectTimeout(tm.config.Timeout)
 	opts.SetAutoReconnect(true)
-	opts.SetKeepAlive(60 * time.Second)
-	opts.SetPingTimeout(10 * time.Second)
+	opts.SetResumeSubs(true)    // Resume subscriptions after reconnection
+	opts.SetCleanSession(false) // Use persistent session to maintain subscriptions
+	opts.SetKeepAlive(tm.config.KeepAlive)
+	opts.SetPingTimeout(tm.config.PingTimeout)
+	opts.SetMaxReconnectInterval(5 * time.Minute)  // Limit max reconnect interval
+	opts.SetConnectRetryInterval(10 * time.Second) // Retry connection every 10 seconds
+	opts.SetOrderMatters(false)                    // Allow out-of-order message processing
+	opts.SetProtocolVersion(4)                     // Use MQTT 3.1.1 protocol
 
 	// Set connection lost handler with panic recovery
 	opts.SetConnectionLostHandler(func(client mqtt.Client, err error) {
@@ -89,6 +95,8 @@ func (tm *TasmotaModule) connect() error {
 			}
 		}()
 		log.Printf("MQTT connection lost: %v", err)
+		// Note: AutoReconnect is enabled, so the client will automatically attempt to reconnect
+		// Subscriptions will be restored due to SetResumeSubs(true) and SetCleanSession(false)
 	})
 
 	// Set reconnect handler with panic recovery
@@ -99,6 +107,7 @@ func (tm *TasmotaModule) connect() error {
 			}
 		}()
 		log.Printf("Connected to MQTT broker: %s", tm.config.Broker)
+		// Note: Subscriptions will be automatically restored due to SetResumeSubs(true)
 	})
 
 	tm.client = mqtt.NewClient(opts)

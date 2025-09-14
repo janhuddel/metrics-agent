@@ -9,11 +9,13 @@ import (
 
 // Config holds the configuration for the Tasmota module.
 type Config struct {
-	Broker   string        // MQTT broker address (e.g., "tcp://localhost:1883")
-	Username string        // MQTT username (optional)
-	Password string        // MQTT password (optional)
-	ClientID string        // MQTT client ID (optional, defaults to hostname)
-	Timeout  time.Duration // Connection timeout (defaults to 30s)
+	Broker      string        // MQTT broker address (e.g., "tcp://localhost:1883")
+	Username    string        // MQTT username (optional)
+	Password    string        // MQTT password (optional)
+	ClientID    string        // MQTT client ID (optional, defaults to hostname)
+	Timeout     time.Duration // Connection timeout (defaults to 30s)
+	KeepAlive   time.Duration // Keep-alive interval (defaults to 60s)
+	PingTimeout time.Duration // Ping timeout (defaults to 10s)
 }
 
 // DeviceInfo represents a discovered Tasmota device.
@@ -51,11 +53,13 @@ type DeviceInfo struct {
 func DefaultConfig() Config {
 	hostname, _ := os.Hostname()
 	return Config{
-		Broker:   getEnvOrDefault("TASMOTA_MQTT_BROKER", "tcp://localhost:1883"),
-		Username: os.Getenv("TASMOTA_MQTT_USERNAME"),
-		Password: os.Getenv("TASMOTA_MQTT_PASSWORD"),
-		ClientID: getEnvOrDefault("TASMOTA_MQTT_CLIENT_ID", hostname+"-tasmota"),
-		Timeout:  30 * time.Second,
+		Broker:      getEnvOrDefault("TASMOTA_MQTT_BROKER", "tcp://localhost:1883"),
+		Username:    os.Getenv("TASMOTA_MQTT_USERNAME"),
+		Password:    os.Getenv("TASMOTA_MQTT_PASSWORD"),
+		ClientID:    getEnvOrDefault("TASMOTA_MQTT_CLIENT_ID", hostname+"-tasmota"),
+		Timeout:     30 * time.Second,
+		KeepAlive:   60 * time.Second,
+		PingTimeout: 10 * time.Second,
 	}
 }
 
