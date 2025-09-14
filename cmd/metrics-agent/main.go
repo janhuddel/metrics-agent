@@ -11,6 +11,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"runtime"
 	"syscall"
 	"time"
@@ -18,6 +19,7 @@ import (
 	"github.com/janhuddel/metrics-agent/internal/metrics"
 	"github.com/janhuddel/metrics-agent/internal/modules"
 	"github.com/janhuddel/metrics-agent/internal/supervisor"
+	"github.com/joho/godotenv"
 )
 
 var (
@@ -38,6 +40,31 @@ const version = "0.1.0"
 // It initializes logging, parses command-line flags, and delegates to either
 // supervisor or worker mode based on the flags.
 func main() {
+	// Load environment variables from .env file (if it exists)
+	// Try multiple locations for the .env file
+	envPaths := []string{
+		".env",                                  // Current directory
+		filepath.Join("..", ".env"),             // Parent directory
+		filepath.Join("..", "..", ".env"),       // Grandparent directory
+		filepath.Join(os.Getenv("PWD"), ".env"), // From PWD environment variable
+	}
+
+	envLoaded := false
+	for _, path := range envPaths {
+		if err := godotenv.Load(path); err == nil {
+			envLoaded = true
+			break
+		}
+	}
+
+	// If no .env file was found, that's okay - continue with system environment variables
+	if !envLoaded {
+		// Only log if we're in debug mode or if there are actual errors (not just missing files)
+		if os.Getenv("DEBUG") != "" {
+			log.Printf("No .env file found in any of the expected locations")
+		}
+	}
+
 	// Configure logging to stderr since stdout is reserved for metrics (Line Protocol)
 	log.SetOutput(os.Stderr)
 	log.SetFlags(log.LstdFlags | log.Lmicroseconds | log.Lmsgprefix)

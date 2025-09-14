@@ -7,6 +7,7 @@
             "request": "launch",
             "mode": "debug",
             "program": "${workspaceFolder}/cmd/metrics-agent",
+            "cwd": "${workspaceFolder}"           
         },
         {
             "name": "Debug Supervisor (In-Process)",
@@ -14,21 +15,26 @@
             "request": "launch",
             "mode": "debug",
             "program": "${workspaceFolder}/cmd/metrics-agent",
+            "cwd": "${workspaceFolder}",
             "args": [
                 "-inprocess"
             ]
         },
         {
-            "name": "Debug Worker (Demo)",
+            "name": "Debug Worker (Tasmota)",
             "type": "go",
             "request": "launch",
             "mode": "debug",
             "program": "${workspaceFolder}/cmd/metrics-agent",
+            "cwd": "${workspaceFolder}",
             "args": [
                 "-worker",
                 "-module",
-                "demo"
-            ]
-        }       
+                "tasmota"
+            ],
+            "env": {
+                "DEBUG": "1"
+            }
+        }
     ]
 }
