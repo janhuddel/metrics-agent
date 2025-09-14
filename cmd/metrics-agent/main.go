@@ -23,6 +23,8 @@ var (
 	flagModule = flag.String("module", "", "Module name to run in worker mode")
 	// Flag, um die Version anzuzeigen.
 	flagVersion = flag.Bool("version", false, "Print version and exit")
+	// Flag, um Module in-process zu starten (für Debugging).
+	flagInProcess = flag.Bool("inprocess", false, "Start workers in-process instead of as subprocesses")
 )
 
 // version kann beim Build mit -ldflags überschrieben werden.
@@ -57,7 +59,7 @@ func main() {
 func runSupervisor() {
 	// Beispielkonfiguration: ein Modul
 	specs := []supervisor.VendorSpec{
-		{Name: "demo"},
+		{Name: "demo", InProcess: *flagInProcess},
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())

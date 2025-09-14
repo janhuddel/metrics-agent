@@ -13,7 +13,7 @@ import (
 // und sendet sie über den Channel an den Supervisor.
 func Run(ctx context.Context, ch chan<- metrics.Metric) error {
 	host, _ := os.Hostname()
-	ticker := time.NewTicker(10 * time.Second)
+	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
 
 	// Erste Metrik direkt beim Start

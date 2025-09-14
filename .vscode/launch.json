@@ -9,6 +9,16 @@
             "program": "${workspaceFolder}/cmd/metrics-agent",
         },
         {
+            "name": "Debug Supervisor (In-Process)",
+            "type": "go",
+            "request": "launch",
+            "mode": "debug",
+            "program": "${workspaceFolder}/cmd/metrics-agent",
+            "args": [
+                "-inprocess"
+            ]
+        },
+        {
             "name": "Debug Worker (Demo)",
             "type": "go",
             "request": "launch",
@@ -19,6 +29,6 @@
                 "-module",
                 "demo"
             ]
-        }
+        }       
     ]
 }

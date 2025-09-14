@@ -11,12 +11,16 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/janhuddel/metrics-agent/internal/metrics"
+	"github.com/janhuddel/metrics-agent/internal/modules/demo"
 )
 
 // VendorSpec beschreibt ein Modul, das überwacht werden soll.
 type VendorSpec struct {
-	Name string
-	Args []string // Platzhalter für spätere Parameter
+	Name      string
+	Args      []string // Platzhalter für spätere Parameter
+	InProcess bool     // Wenn true, wird das Modul in-process gestartet
 }
 
 // procState hält den Zustand eines gestarteten Moduls.
@@ -32,6 +36,10 @@ type procState struct {
 	restarting   bool // Neustart (SIGHUP)
 	stdoutPrefix string
 	stderrPrefix string
+	// In-process worker state
+	inProcessCtx    context.Context
+	inProcessCancel context.CancelFunc
+	inProcessDone   chan struct{}
 }
 
 // Supervisor verwaltet mehrere Module (Subprozesse).
@@ -103,8 +111,23 @@ func (s *Supervisor) runLoop(ctx context.Context, ps *procState) {
 			s.events <- fmt.Sprintf("%s spawn error: %v", ps.spec.Name, err)
 		}
 
-		err := ps.cmd.Wait()
-		uptime := time.Since(ps.startedAt)
+		var err error
+		var uptime time.Duration
+
+		if ps.spec.InProcess {
+			// In-process worker: warten auf done channel
+			select {
+			case <-ps.inProcessDone:
+				uptime = time.Since(ps.startedAt)
+				// In-process worker ist beendet
+			case <-ctx.Done():
+				return
+			}
+		} else {
+			// Subprocess: warten auf cmd.Wait()
+			err = ps.cmd.Wait()
+			uptime = time.Since(ps.startedAt)
+		}
 
 		if ps.stopping {
 			// endgültiger Stopp
@@ -147,8 +170,16 @@ func (s *Supervisor) runLoop(ctx context.Context, ps *procState) {
 	}
 }
 
-// spawn startet das eigentliche Modul als Subprozess.
+// spawn startet das eigentliche Modul als Subprozess oder in-process.
 func (s *Supervisor) spawn(ctx context.Context, ps *procState) error {
+	if ps.spec.InProcess {
+		return s.spawnInProcess(ctx, ps)
+	}
+	return s.spawnSubprocess(ctx, ps)
+}
+
+// spawnSubprocess startet das Modul als Subprozess.
+func (s *Supervisor) spawnSubprocess(ctx context.Context, ps *procState) error {
 	// Wir starten das gleiche Binary mit -worker und -module.
 	args := []string{"-worker", "-module", ps.spec.Name}
 	cmd := exec.Command(os.Args[0], args...)
@@ -180,11 +211,54 @@ func (s *Supervisor) spawn(ctx context.Context, ps *procState) error {
 	return nil
 }
 
+// spawnInProcess startet das Modul in-process.
+func (s *Supervisor) spawnInProcess(ctx context.Context, ps *procState) error {
+	// Context für das in-process Modul
+	ps.inProcessCtx, ps.inProcessCancel = context.WithCancel(ctx)
+	ps.inProcessDone = make(chan struct{})
+
+	// Channel für Metriken
+	metricCh := make(chan metrics.Metric, 100)
+
+	// Metriken-Serializer
+	go func() {
+		for m := range metricCh {
+			line, err := m.ToLineProtocol()
+			if err != nil {
+				log.Printf("%sserialization error: %v", ps.stderrPrefix, err)
+				continue
+			}
+			fmt.Println(line) // direkt STDOUT
+		}
+	}()
+
+	// Modul in separater Goroutine starten
+	go func() {
+		defer close(ps.inProcessDone)
+		defer close(metricCh)
+
+		// Modul-Dispatch
+		switch ps.spec.Name {
+		case "demo":
+			if err := demo.Run(ps.inProcessCtx, metricCh); err != nil {
+				log.Printf("%smodule error: %v", ps.stderrPrefix, err)
+			}
+		default:
+			log.Printf("%sunknown module: %s", ps.stderrPrefix, ps.spec.Name)
+		}
+	}()
+
+	ps.startedAt = time.Now()
+	ps.stopping = false
+	ps.restarts = 0
+	return nil
+}
+
 // stop beendet ein Modul sanft (erst Interrupt, dann notfalls Kill).
 func (s *Supervisor) stop(ctx context.Context, ps *procState, restart bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if ps == nil || ps.cmd == nil {
+	if ps == nil {
 		return
 	}
 
@@ -194,19 +268,47 @@ func (s *Supervisor) stop(ctx context.Context, ps *procState, restart bool) {
 		ps.stopping = true
 	}
 
-	_ = ps.cmd.Process.Signal(os.Interrupt)
+	if ps.spec.InProcess {
+		// In-process worker: cancel context
+		if ps.inProcessCancel != nil {
+			ps.inProcessCancel()
+		}
 
-	done := make(chan struct{})
-	go func() {
-		ps.cmd.Wait()
-		close(done)
-	}()
+		// Warten auf Beendigung
+		done := make(chan struct{})
+		go func() {
+			if ps.inProcessDone != nil {
+				<-ps.inProcessDone
+			}
+			close(done)
+		}()
 
-	select {
-	case <-ctx.Done():
-	case <-done:
-	case <-time.After(5 * time.Second):
-		_ = ps.cmd.Process.Kill()
+		select {
+		case <-ctx.Done():
+		case <-done:
+		case <-time.After(5 * time.Second):
+			// Timeout - in-process worker sollte sich beenden
+		}
+	} else {
+		// Subprocess: Signal senden
+		if ps.cmd == nil || ps.cmd.Process == nil {
+			return
+		}
+
+		_ = ps.cmd.Process.Signal(os.Interrupt)
+
+		done := make(chan struct{})
+		go func() {
+			ps.cmd.Wait()
+			close(done)
+		}()
+
+		select {
+		case <-ctx.Done():
+		case <-done:
+		case <-time.After(5 * time.Second):
+			_ = ps.cmd.Process.Kill()
+		}
 	}
 }
 
