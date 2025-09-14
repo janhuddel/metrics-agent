@@ -66,6 +66,12 @@ func (sp *SensorProcessor) processSensorType(device *DeviceInfo, sensorType stri
 				Timestamp: timestamp,
 			}
 
+			// Validate metric before sending to prevent serialization errors
+			if err := metric.Validate(); err != nil {
+				log.Printf("Warning: invalid metric for device %s, field %s: %v", device.T, field, err)
+				continue
+			}
+
 			// Send metric with timeout to prevent blocking
 			select {
 			case sp.metricsCh <- metric:

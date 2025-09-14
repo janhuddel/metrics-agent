@@ -16,7 +16,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/janhuddel/metrics-agent/internal/metrics"
+	"github.com/janhuddel/metrics-agent/internal/metricchannel"
 	"github.com/janhuddel/metrics-agent/internal/modules"
 	"github.com/janhuddel/metrics-agent/internal/supervisor"
 	"github.com/joho/godotenv"
@@ -154,8 +154,9 @@ func runWorker(moduleName string) {
 		log.Fatalf("[worker] missing -module flag")
 	}
 
-	// Create buffered channel for metrics
-	metricCh := make(chan metrics.Metric, 100)
+	// Create metric channel
+	metricCh := metricchannel.New(100)
+	defer metricCh.Close()
 
 	// Set up context for graceful shutdown
 	ctx, cancel := context.WithCancel(context.Background())
@@ -174,23 +175,8 @@ func runWorker(moduleName string) {
 		cancel()
 	}()
 
-	// Start metric serializer goroutine with panic recovery
-	go func() {
-		defer func() {
-			if r := recover(); r != nil {
-				log.Printf("[worker] metric serializer panic recovered: %v", r)
-			}
-		}()
-
-		for m := range metricCh {
-			line, err := m.ToLineProtocol()
-			if err != nil {
-				log.Printf("[worker] serialization error: %v", err)
-				continue
-			}
-			fmt.Println(line) // Write directly to stdout
-		}
-	}()
+	// Start metric serializer
+	metricCh.StartSerializer()
 
 	// Run the specified module with panic recovery
 	func() {
@@ -200,11 +186,8 @@ func runWorker(moduleName string) {
 			}
 		}()
 
-		if err := modules.Global.Run(ctx, moduleName, metricCh); err != nil {
+		if err := modules.Global.Run(ctx, moduleName, metricCh.Get()); err != nil {
 			log.Fatalf("[worker] module %s error: %v", moduleName, err)
 		}
 	}()
-
-	// Close channel when module finishes
-	close(metricCh)
 }

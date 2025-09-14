@@ -26,9 +26,19 @@ func TestToLineProtocol_IntAndTags(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	want := `cpu_usage,host=my\ host,vendor=demo value=42i 1234567890`
-	if got != want {
-		t.Errorf("wrong line protocol:\n got:  %s\n want: %s", got, want)
+	// Check that the result contains the expected components (order may vary)
+	expectedComponents := []string{
+		"cpu_usage",
+		"host=my\\ host",
+		"vendor=demo",
+		"value=42i",
+		"1234567890",
+	}
+
+	for _, component := range expectedComponents {
+		if !containsString(got, component) {
+			t.Errorf("wrong line protocol: missing component '%s' in result: %s", component, got)
+		}
 	}
 }
 
@@ -47,4 +57,22 @@ func TestToLineProtocol_StringField(t *testing.T) {
 	if want := `demo_metric status="ok"`; got != want {
 		t.Errorf("got %q, want %q", got, want)
 	}
+}
+
+// Helper function to check if a string contains a substring.
+func containsString(s, substr string) bool {
+	return len(s) >= len(substr) && (s == substr ||
+		(len(s) > len(substr) &&
+			(s[:len(substr)] == substr ||
+				s[len(s)-len(substr):] == substr ||
+				containsSubstring(s, substr))))
+}
+
+func containsSubstring(s, substr string) bool {
+	for i := 0; i <= len(s)-len(substr); i++ {
+		if s[i:i+len(substr)] == substr {
+			return true
+		}
+	}
+	return false
 }

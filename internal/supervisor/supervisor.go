@@ -273,7 +273,7 @@ func (s *Supervisor) spawnInProcess(ctx context.Context, ps *procState) error {
 		}()
 
 		for m := range metricCh {
-			line, err := m.ToLineProtocol()
+			line, err := m.ToLineProtocolSafe()
 			if err != nil {
 				log.Printf("%sserialization error: %v", ps.stderrPrefix, err)
 				continue
