@@ -1,6 +1,7 @@
 package tasmota
 
 import (
+	"log"
 	"time"
 
 	"github.com/janhuddel/metrics-agent/internal/metrics"
@@ -20,6 +21,12 @@ func NewSensorProcessor(metricsCh chan<- metrics.Metric) *SensorProcessor {
 
 // ProcessSensorData extracts metrics from sensor data.
 func (sp *SensorProcessor) ProcessSensorData(device *DeviceInfo, sensorData map[string]interface{}) {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("Sensor processor panic recovered for device %s: %v", device.T, r)
+		}
+	}()
+
 	timestamp := time.Now()
 
 	// Process each sensor type
@@ -32,6 +39,12 @@ func (sp *SensorProcessor) ProcessSensorData(device *DeviceInfo, sensorData map[
 
 // processSensorType processes a specific sensor type (e.g., "DS18B20", "DHT22", etc.).
 func (sp *SensorProcessor) processSensorType(device *DeviceInfo, sensorType string, data map[string]interface{}, timestamp time.Time) {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("Sensor type processor panic recovered for device %s, sensor %s: %v", device.T, sensorType, r)
+		}
+	}()
+
 	// Create base tags for this sensor
 	tags := map[string]string{
 		"device":      device.T,
@@ -52,7 +65,14 @@ func (sp *SensorProcessor) processSensorType(device *DeviceInfo, sensorType stri
 				Fields:    map[string]interface{}{field: value},
 				Timestamp: timestamp,
 			}
-			sp.metricsCh <- metric
+
+			// Send metric with timeout to prevent blocking
+			select {
+			case sp.metricsCh <- metric:
+				// Metric sent successfully
+			case <-time.After(1 * time.Second):
+				log.Printf("Warning: metric channel full, dropping metric for device %s", device.T)
+			}
 		}
 	}
 }

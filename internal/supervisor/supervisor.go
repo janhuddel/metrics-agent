@@ -47,19 +47,24 @@ type procState struct {
 // Supervisor manages multiple modules (subprocesses or in-process workers).
 // It starts them, monitors them, and restarts them if they crash.
 type Supervisor struct {
-	mu        sync.Mutex
+	mu        sync.RWMutex
 	procs     map[string]*procState
 	events    chan string // Events sent to external consumers
 	inProcess bool        // If true, all modules are started in-process
+	ctx       context.Context
+	cancel    context.CancelFunc
 }
 
 // New creates a new Supervisor instance.
 // If inProcess is true, modules will be run in-process instead of as subprocesses.
 func New(inProcess bool) *Supervisor {
+	ctx, cancel := context.WithCancel(context.Background())
 	return &Supervisor{
 		procs:     make(map[string]*procState),
-		events:    make(chan string, 64),
+		events:    make(chan string, 128), // Increased buffer size
 		inProcess: inProcess,
+		ctx:       ctx,
+		cancel:    cancel,
 	}
 }
 
@@ -84,15 +89,20 @@ func (s *Supervisor) Start(ctx context.Context, spec VendorSpec) error {
 	s.procs[spec.Name] = ps
 
 	// Start the run loop which manages the process and handles restarts
-	go s.runLoop(ctx, ps)
+	go s.runLoop(s.ctx, ps)
 	return nil
 }
 
 // RestartAll stops and restarts all modules.
 func (s *Supervisor) RestartAll(ctx context.Context) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.mu.RLock()
+	procs := make([]*procState, 0, len(s.procs))
 	for _, ps := range s.procs {
+		procs = append(procs, ps)
+	}
+	s.mu.RUnlock()
+
+	for _, ps := range procs {
 		go s.stop(ctx, ps, true) // restart=true
 	}
 }
@@ -100,24 +110,49 @@ func (s *Supervisor) RestartAll(ctx context.Context) {
 // StopAll stops all modules gracefully.
 func (s *Supervisor) StopAll(ctx context.Context) {
 	var wg sync.WaitGroup
-	s.mu.Lock()
+	s.mu.RLock()
+	procs := make([]*procState, 0, len(s.procs))
 	for _, ps := range s.procs {
+		procs = append(procs, ps)
+	}
+	s.mu.RUnlock()
+
+	for _, ps := range procs {
 		wg.Add(1)
 		go func(ps *procState) {
 			defer wg.Done()
 			s.stop(ctx, ps, false) // restart=false
 		}(ps)
 	}
-	s.mu.Unlock()
 	wg.Wait()
+
+	// Cancel supervisor context to stop all runLoops
+	s.cancel()
 }
 
 // runLoop starts a module, monitors it, and restarts it after crashes.
 // It implements exponential backoff for restart attempts.
 func (s *Supervisor) runLoop(ctx context.Context, ps *procState) {
+	defer func() {
+		if r := recover(); r != nil {
+			s.sendEvent(fmt.Sprintf("%s runLoop panic recovered: %v", ps.spec.Name, r))
+		}
+		// Clean up process state
+		s.mu.Lock()
+		delete(s.procs, ps.spec.Name)
+		s.mu.Unlock()
+	}()
+
 	for {
 		if err := s.spawn(ctx, ps); err != nil {
-			s.events <- fmt.Sprintf("%s spawn error: %v", ps.spec.Name, err)
+			s.sendEvent(fmt.Sprintf("%s spawn error: %v", ps.spec.Name, err))
+			// Implement retry with backoff for spawn failures
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(ps.backoff):
+				continue
+			}
 		}
 
 		var err error
@@ -140,22 +175,22 @@ func (s *Supervisor) runLoop(ctx context.Context, ps *procState) {
 
 		if ps.stopping {
 			// Final stop requested
-			s.events <- fmt.Sprintf("%s stopped", ps.spec.Name)
+			s.sendEvent(fmt.Sprintf("%s stopped", ps.spec.Name))
 			return
 		}
 
 		if ps.restarting {
 			// Restart: reset flag and restart immediately (no backoff)
 			ps.restarting = false
-			s.events <- fmt.Sprintf("%s restarting (uptime=%s)", ps.spec.Name, uptime)
+			s.sendEvent(fmt.Sprintf("%s restarting (uptime=%s)", ps.spec.Name, uptime))
 			continue
 		}
 
 		// Regular exit (e.g., crash)
 		if err != nil {
-			s.events <- fmt.Sprintf("%s exited: %v (uptime=%s)", ps.spec.Name, err, uptime)
+			s.sendEvent(fmt.Sprintf("%s exited: %v (uptime=%s)", ps.spec.Name, err, uptime))
 		} else {
-			s.events <- fmt.Sprintf("%s exited normally (uptime=%s)", ps.spec.Name, uptime)
+			s.sendEvent(fmt.Sprintf("%s exited normally (uptime=%s)", ps.spec.Name, uptime))
 		}
 
 		// Implement exponential backoff strategy
@@ -229,8 +264,14 @@ func (s *Supervisor) spawnInProcess(ctx context.Context, ps *procState) error {
 	// Create channel for metrics
 	metricCh := make(chan metrics.Metric, 100)
 
-	// Start metric serializer goroutine
+	// Start metric serializer goroutine with panic recovery
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				log.Printf("%smetric serializer panic recovered: %v", ps.stderrPrefix, r)
+			}
+		}()
+
 		for m := range metricCh {
 			line, err := m.ToLineProtocol()
 			if err != nil {
@@ -241,10 +282,15 @@ func (s *Supervisor) spawnInProcess(ctx context.Context, ps *procState) error {
 		}
 	}()
 
-	// Start module in separate goroutine
+	// Start module in separate goroutine with panic recovery
 	go func() {
-		defer close(ps.inProcessDone)
-		defer close(metricCh)
+		defer func() {
+			if r := recover(); r != nil {
+				log.Printf("%smodule panic recovered: %v", ps.stderrPrefix, r)
+			}
+			close(ps.inProcessDone)
+			close(metricCh)
+		}()
 
 		// Dispatch module through registry
 		if err := modules.Global.Run(ps.inProcessCtx, ps.spec.Name, metricCh); err != nil {
@@ -260,17 +306,18 @@ func (s *Supervisor) spawnInProcess(ctx context.Context, ps *procState) error {
 
 // stop gracefully stops a module (first interrupt, then kill if necessary).
 func (s *Supervisor) stop(ctx context.Context, ps *procState, restart bool) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
 	if ps == nil {
 		return
 	}
 
+	// Set flags atomically
+	s.mu.Lock()
 	if restart {
 		ps.restarting = true
 	} else {
 		ps.stopping = true
 	}
+	s.mu.Unlock()
 
 	if s.inProcess {
 		// In-process worker: cancel context
@@ -292,6 +339,7 @@ func (s *Supervisor) stop(ctx context.Context, ps *procState, restart bool) {
 		case <-done:
 		case <-time.After(5 * time.Second):
 			// Timeout - in-process worker should terminate
+			s.sendEvent(fmt.Sprintf("%s stop timeout", ps.spec.Name))
 		}
 	} else {
 		// Subprocess: send signal
@@ -312,6 +360,7 @@ func (s *Supervisor) stop(ctx context.Context, ps *procState, restart bool) {
 		case <-done:
 		case <-time.After(5 * time.Second):
 			_ = ps.cmd.Process.Kill()
+			s.sendEvent(fmt.Sprintf("%s force killed", ps.spec.Name))
 		}
 	}
 }
@@ -339,6 +388,18 @@ func forwardLines(dst io.Writer, src io.Reader) {
 		bw.Flush()
 	}
 	_ = bw.Flush()
+}
+
+// sendEvent sends an event to the events channel in a non-blocking way.
+// If the channel is full, it logs the event instead to prevent deadlocks.
+func (s *Supervisor) sendEvent(event string) {
+	select {
+	case s.events <- event:
+		// Event sent successfully
+	default:
+		// Channel is full, log instead to prevent blocking
+		log.Printf("[supervisor] event (channel full): %s", event)
+	}
 }
 
 // isBrokenPipe checks if an error is a broken pipe error.

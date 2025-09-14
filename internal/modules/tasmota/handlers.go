@@ -11,6 +11,12 @@ import (
 
 // handleDiscoveryMessage processes incoming device discovery messages.
 func (tm *TasmotaModule) handleDiscoveryMessage(client mqtt.Client, msg mqtt.Message) {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("Discovery message handler panic recovered: %v", r)
+		}
+	}()
+
 	var device DeviceInfo
 	if err := json.Unmarshal(msg.Payload(), &device); err != nil {
 		log.Printf("Failed to parse device discovery message: %v", err)
@@ -50,6 +56,12 @@ func (tm *TasmotaModule) createSensorHandler(deviceTopic string) mqtt.MessageHan
 
 // handleSensorMessage processes incoming sensor data messages.
 func (tm *TasmotaModule) handleSensorMessage(deviceTopic string, msg mqtt.Message) {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("Sensor message handler panic recovered for device %s: %v", deviceTopic, r)
+		}
+	}()
+
 	// Get device info
 	device, exists := tm.deviceMgr.GetDevice(deviceTopic)
 

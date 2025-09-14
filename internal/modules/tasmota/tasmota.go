@@ -39,6 +39,12 @@ func Run(ctx context.Context, ch chan<- metrics.Metric) error {
 
 // run executes the main module loop.
 func (tm *TasmotaModule) run(ctx context.Context) error {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("Tasmota module panic recovered: %v", r)
+		}
+	}()
+
 	// Connect to MQTT broker
 	if err := tm.connect(); err != nil {
 		return fmt.Errorf("failed to connect to MQTT broker: %w", err)
@@ -54,11 +60,17 @@ func (tm *TasmotaModule) run(ctx context.Context) error {
 
 	// Wait for context cancellation
 	<-ctx.Done()
-	return nil
+	return ctx.Err()
 }
 
 // connect establishes connection to the MQTT broker.
 func (tm *TasmotaModule) connect() error {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("MQTT connect panic recovered: %v", r)
+		}
+	}()
+
 	opts := mqtt.NewClientOptions()
 	opts.AddBroker(tm.config.Broker)
 	opts.SetClientID(tm.config.ClientID)
@@ -69,13 +81,23 @@ func (tm *TasmotaModule) connect() error {
 	opts.SetKeepAlive(60 * time.Second)
 	opts.SetPingTimeout(10 * time.Second)
 
-	// Set connection lost handler
+	// Set connection lost handler with panic recovery
 	opts.SetConnectionLostHandler(func(client mqtt.Client, err error) {
+		defer func() {
+			if r := recover(); r != nil {
+				log.Printf("MQTT connection lost handler panic recovered: %v", r)
+			}
+		}()
 		log.Printf("MQTT connection lost: %v", err)
 	})
 
-	// Set reconnect handler
+	// Set reconnect handler with panic recovery
 	opts.SetOnConnectHandler(func(client mqtt.Client) {
+		defer func() {
+			if r := recover(); r != nil {
+				log.Printf("MQTT reconnect handler panic recovered: %v", r)
+			}
+		}()
 		log.Printf("Connected to MQTT broker: %s", tm.config.Broker)
 	})
 
@@ -89,6 +111,12 @@ func (tm *TasmotaModule) connect() error {
 
 // disconnect closes the MQTT connection.
 func (tm *TasmotaModule) disconnect() {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("MQTT disconnect panic recovered: %v", r)
+		}
+	}()
+
 	if tm.client != nil && tm.client.IsConnected() {
 		tm.client.Disconnect(250)
 	}

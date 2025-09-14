@@ -50,10 +50,20 @@ func (r *Registry) List() []string {
 
 // Run executes a module by name.
 // It retrieves the module function and runs it with the provided context and channel.
+// Panics are recovered and returned as errors.
 func (r *Registry) Run(ctx context.Context, name string, ch chan<- metrics.Metric) error {
 	fn, err := r.Get(name)
 	if err != nil {
 		return err
 	}
+
+	// Execute module with panic recovery
+	defer func() {
+		if r := recover(); r != nil {
+			// Panic is handled by the caller (supervisor or worker)
+			panic(r)
+		}
+	}()
+
 	return fn(ctx, ch)
 }

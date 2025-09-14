@@ -144,6 +144,12 @@ func runSupervisor() {
 // runWorker starts a specific module directly.
 // It is called by the supervisor process as a subprocess.
 func runWorker(moduleName string) {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Fatalf("[worker] panic recovered: %v", r)
+		}
+	}()
+
 	if moduleName == "" {
 		log.Fatalf("[worker] missing -module flag")
 	}
@@ -159,12 +165,23 @@ func runWorker(moduleName string) {
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGINT)
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				log.Printf("[worker] signal handler panic recovered: %v", r)
+			}
+		}()
 		<-sigCh
 		cancel()
 	}()
 
-	// Start metric serializer goroutine
+	// Start metric serializer goroutine with panic recovery
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				log.Printf("[worker] metric serializer panic recovered: %v", r)
+			}
+		}()
+
 		for m := range metricCh {
 			line, err := m.ToLineProtocol()
 			if err != nil {
@@ -175,10 +192,18 @@ func runWorker(moduleName string) {
 		}
 	}()
 
-	// Run the specified module
-	if err := modules.Global.Run(ctx, moduleName, metricCh); err != nil {
-		log.Fatalf("[worker] module %s error: %v", moduleName, err)
-	}
+	// Run the specified module with panic recovery
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				log.Fatalf("[worker] module %s panic: %v", moduleName, r)
+			}
+		}()
+
+		if err := modules.Global.Run(ctx, moduleName, metricCh); err != nil {
+			log.Fatalf("[worker] module %s error: %v", moduleName, err)
+		}
+	}()
 
 	// Close channel when module finishes
 	close(metricCh)
