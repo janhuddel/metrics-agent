@@ -3,19 +3,24 @@
 package tasmota
 
 import (
-	"os"
 	"time"
+
+	"github.com/janhuddel/metrics-agent/internal/config"
 )
 
 // Config holds the configuration for the Tasmota module.
 type Config struct {
-	Broker      string        // MQTT broker address (e.g., "tcp://localhost:1883")
-	Username    string        // MQTT username (optional)
-	Password    string        // MQTT password (optional)
-	ClientID    string        // MQTT client ID (optional, defaults to hostname)
-	Timeout     time.Duration // Connection timeout (defaults to 30s)
-	KeepAlive   time.Duration // Keep-alive interval (defaults to 60s)
-	PingTimeout time.Duration // Ping timeout (defaults to 10s)
+	// Embed the base configuration for common functionality
+	config.BaseConfig
+
+	// Tasmota-specific settings
+	Broker      string        `json:"broker"`       // MQTT broker address (e.g., "tcp://localhost:1883")
+	Username    string        `json:"username"`     // MQTT username (optional)
+	Password    string        `json:"password"`     // MQTT password (optional)
+	ClientID    string        `json:"client_id"`    // MQTT client ID (optional, defaults to hostname)
+	Timeout     time.Duration `json:"timeout"`      // Connection timeout (defaults to 30s)
+	KeepAlive   time.Duration `json:"keep_alive"`   // Keep-alive interval (defaults to 60s)
+	PingTimeout time.Duration `json:"ping_timeout"` // Ping timeout (defaults to 10s)
 }
 
 // DeviceInfo represents a discovered Tasmota device.
@@ -49,24 +54,41 @@ type DeviceInfo struct {
 	VER   int            `json:"ver"`   // Version
 }
 
-// DefaultConfig returns a default configuration using environment variables.
+// DefaultConfig returns a default configuration.
 func DefaultConfig() Config {
-	hostname, _ := os.Hostname()
 	return Config{
-		Broker:      getEnvOrDefault("TASMOTA_MQTT_BROKER", "tcp://localhost:1883"),
-		Username:    os.Getenv("TASMOTA_MQTT_USERNAME"),
-		Password:    os.Getenv("TASMOTA_MQTT_PASSWORD"),
-		ClientID:    getEnvOrDefault("TASMOTA_MQTT_CLIENT_ID", hostname+"-tasmota"),
+		BaseConfig: config.BaseConfig{
+			FriendlyNameOverrides: make(map[string]string),
+		},
+		Broker:      "tcp://localhost:1883",
+		Username:    "",
+		Password:    "",
+		ClientID:    "",
 		Timeout:     30 * time.Second,
 		KeepAlive:   60 * time.Second,
 		PingTimeout: 10 * time.Second,
 	}
 }
 
-// getEnvOrDefault returns the environment variable value or a default if not set.
-func getEnvOrDefault(key, defaultValue string) string {
-	if value := os.Getenv(key); value != "" {
-		return value
+// GetFriendlyName returns the friendly name for a device, checking for overrides first.
+func (c *Config) GetFriendlyName(device *DeviceInfo, suffix string) string {
+	deviceFriendlyName := ""
+	if len(device.FN) > 0 && device.FN[0] != "" {
+		deviceFriendlyName = device.FN[0]
 	}
-	return defaultValue
+	return c.BaseConfig.GetFriendlyName(device.T+suffix, deviceFriendlyName, device.DN)
+}
+
+// LoadConfig loads configuration using the centralized configuration system.
+func LoadConfig() Config {
+	loader := config.NewLoader("tasmota")
+	defaultConfig := DefaultConfig()
+
+	loadedConfig, err := loader.LoadConfig(&defaultConfig)
+	if err != nil {
+		// If loading fails, return default config
+		return defaultConfig
+	}
+
+	return *loadedConfig.(*Config)
 }

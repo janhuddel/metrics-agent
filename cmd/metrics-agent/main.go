@@ -11,15 +11,14 @@ import (
 	"log"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"runtime"
 	"syscall"
 	"time"
 
+	"github.com/janhuddel/metrics-agent/internal/config"
 	"github.com/janhuddel/metrics-agent/internal/metricchannel"
 	"github.com/janhuddel/metrics-agent/internal/modules"
 	"github.com/janhuddel/metrics-agent/internal/supervisor"
-	"github.com/joho/godotenv"
 )
 
 var (
@@ -40,35 +39,24 @@ const version = "0.1.0"
 // It initializes logging, parses command-line flags, and delegates to either
 // supervisor or worker mode based on the flags.
 func main() {
-	// Load environment variables from .env file (if it exists)
-	// Try multiple locations for the .env file
-	envPaths := []string{
-		".env",                                  // Current directory
-		filepath.Join("..", ".env"),             // Parent directory
-		filepath.Join("..", "..", ".env"),       // Grandparent directory
-		filepath.Join(os.Getenv("PWD"), ".env"), // From PWD environment variable
-	}
-
-	envLoaded := false
-	for _, path := range envPaths {
-		if err := godotenv.Load(path); err == nil {
-			envLoaded = true
-			break
-		}
-	}
-
-	// If no .env file was found, that's okay - continue with system environment variables
-	if !envLoaded {
-		// Only log if we're in debug mode or if there are actual errors (not just missing files)
-		if os.Getenv("DEBUG") != "" {
-			log.Printf("No .env file found in any of the expected locations")
-		}
+	// Load global configuration first to set log level
+	globalConfig, err := config.LoadGlobalConfig()
+	if err != nil {
+		// If config loading fails, continue with default logging
+		log.Printf("Warning: Failed to load global configuration: %v", err)
 	}
 
 	// Configure logging to stderr since stdout is reserved for metrics (Line Protocol)
 	log.SetOutput(os.Stderr)
-	log.SetFlags(log.LstdFlags | log.Lmicroseconds | log.Lmsgprefix)
 	log.SetPrefix("[metric-agent] ")
+
+	// Set log level from configuration (defaults to info if not set)
+	if globalConfig != nil && globalConfig.LogLevel != "" {
+		config.SetLogLevel(globalConfig.LogLevel)
+	} else {
+		// Default to info level
+		config.SetLogLevel("info")
+	}
 
 	flag.Parse()
 

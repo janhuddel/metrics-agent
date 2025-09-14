@@ -3,6 +3,7 @@ package tasmota
 import (
 	"fmt"
 	"log"
+	"strings"
 	"time"
 
 	"github.com/janhuddel/metrics-agent/internal/metrics"
@@ -11,12 +12,14 @@ import (
 // SensorProcessor handles sensor data processing and metric creation.
 type SensorProcessor struct {
 	metricsCh chan<- metrics.Metric
+	config    *Config
 }
 
 // NewSensorProcessor creates a new sensor processor.
-func NewSensorProcessor(metricsCh chan<- metrics.Metric) *SensorProcessor {
+func NewSensorProcessor(metricsCh chan<- metrics.Metric, config *Config) *SensorProcessor {
 	return &SensorProcessor{
 		metricsCh: metricsCh,
+		config:    config,
 	}
 }
 
@@ -50,18 +53,6 @@ func (sp *SensorProcessor) processEnergySensor(device *DeviceInfo, sensorType st
 		}
 	}()
 
-	// Create base tags for this sensor
-	tags := map[string]string{
-		"vendor": "tasmota",
-		"device": device.T,
-		"friendly": func() string {
-			if len(device.FN) > 0 && device.FN[0] != "" {
-				return device.FN[0]
-			}
-			return device.DN
-		}(),
-	}
-
 	// Handle Power field - it can be either a single float64 or an array of float64 values
 	powerValue, exists := data["Power"]
 	if !exists {
@@ -72,20 +63,42 @@ func (sp *SensorProcessor) processEnergySensor(device *DeviceInfo, sensorType st
 	// Check if Power is an array or single value
 	switch powerData := powerValue.(type) {
 	case float64:
+		// Create base tags for this sensor
+		tags := map[string]string{
+			"vendor":   "tasmota",
+			"device":   device.T,
+			"friendly": sp.config.GetFriendlyName(device, ""),
+		}
+
+		fields := map[string]any{
+			"power":   powerValue,
+			"voltage": data["Voltage"],
+			"current": data["Current"],
+		}
+
 		// Single power value
-		sp.sendPowerMetric(device, tags, powerData, timestamp)
+		sp.sendPowerMetric(device, tags, fields, timestamp)
 	case []any:
 		// Array of power values - send one metric for each element
 		for i, powerItem := range powerData {
-			if powerFloat, ok := powerItem.(float64); ok {
-				// Create tags with index for array elements
-				arrayTags := make(map[string]string)
-				for k, v := range tags {
-					arrayTags[k] = v
-				}
-				arrayTags["power_index"] = fmt.Sprintf("%d", i)
+			suffix := "." + fmt.Sprintf("%d", i)
+			// Create base tags for this sensor
+			tags := map[string]string{
+				"vendor":   "tasmota",
+				"device":   device.T + suffix,
+				"friendly": sp.config.GetFriendlyName(device, suffix),
+			}
 
-				sp.sendPowerMetric(device, arrayTags, powerFloat, timestamp)
+			if powerFloat, ok := powerItem.(float64); ok {
+				fields := map[string]any{
+					"power": powerFloat,
+				}
+
+				// Add voltage and current fields using helper function
+				sp.addFieldAtIndex(fields, data, "Voltage", i)
+				sp.addFieldAtIndex(fields, data, "Current", i)
+
+				sp.sendPowerMetric(device, tags, fields, timestamp)
 			} else {
 				log.Printf("Warning: invalid power value type at index %d for device %s: %T", i, device.T, powerItem)
 			}
@@ -95,12 +108,24 @@ func (sp *SensorProcessor) processEnergySensor(device *DeviceInfo, sensorType st
 	}
 }
 
-// sendPowerMetric sends a single power metric to the metrics channel.
-func (sp *SensorProcessor) sendPowerMetric(device *DeviceInfo, tags map[string]string, powerValue float64, timestamp time.Time) {
-	fields := map[string]any{
-		"power": powerValue,
+// addFieldAtIndex adds a field to the fields map, handling both single values and arrays.
+func (sp *SensorProcessor) addFieldAtIndex(fields map[string]any, data map[string]any, fieldName string, index int) {
+	fieldKey := fieldName
+	if value, exists := data[fieldName]; exists {
+		if valueArray, isArray := value.([]any); isArray {
+			// Field is an array, get the value at the specified index
+			if index < len(valueArray) {
+				fields[strings.ToLower(fieldKey)] = valueArray[index]
+			}
+		} else {
+			// Field is a single value, use it for all channels
+			fields[strings.ToLower(fieldKey)] = value
+		}
 	}
+}
 
+// sendPowerMetric sends a single power metric to the metrics channel.
+func (sp *SensorProcessor) sendPowerMetric(device *DeviceInfo, tags map[string]string, fields map[string]any, timestamp time.Time) {
 	metric := metrics.Metric{
 		Name:      "electricity",
 		Tags:      tags,

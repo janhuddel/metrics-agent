@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"os"
 	"time"
 
 	mqtt "github.com/eclipse/paho.mqtt.golang"
@@ -29,10 +30,10 @@ func NewTasmotaModule(config Config) *TasmotaModule {
 
 // Run starts the Tasmota module and begins collecting metrics.
 func Run(ctx context.Context, ch chan<- metrics.Metric) error {
-	config := DefaultConfig()
+	config := LoadConfig()
 	module := NewTasmotaModule(config)
 	module.metricsCh = ch
-	module.processor = NewSensorProcessor(ch)
+	module.processor = NewSensorProcessor(ch, &config)
 
 	return module.run(ctx)
 }
@@ -71,9 +72,16 @@ func (tm *TasmotaModule) connect() error {
 		}
 	}()
 
+	// Set default client ID if not provided
+	clientID := tm.config.ClientID
+	if clientID == "" {
+		hostname, _ := os.Hostname()
+		clientID = hostname + "-tasmota"
+	}
+
 	opts := mqtt.NewClientOptions()
 	opts.AddBroker(tm.config.Broker)
-	opts.SetClientID(tm.config.ClientID)
+	opts.SetClientID(clientID)
 	opts.SetUsername(tm.config.Username)
 	opts.SetPassword(tm.config.Password)
 	opts.SetConnectTimeout(tm.config.Timeout)
@@ -142,7 +150,7 @@ func (tm *TasmotaModule) ProcessSensorData(device *DeviceInfo, sensorData map[st
 func (tm *TasmotaModule) SetMetricsChannel(ch chan<- metrics.Metric) {
 	tm.metricsCh = ch
 	if tm.processor == nil {
-		tm.processor = NewSensorProcessor(ch)
+		tm.processor = NewSensorProcessor(ch, &tm.config)
 	} else {
 		tm.processor.SetMetricsChannel(ch)
 	}

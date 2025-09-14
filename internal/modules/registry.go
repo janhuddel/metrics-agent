@@ -11,6 +11,15 @@ import (
 // It receives a context for cancellation and a channel to send metrics.
 type ModuleFunc func(ctx context.Context, ch chan<- metrics.Metric) error
 
+// ConfigurableModule represents a module that can be configured.
+// Modules implementing this interface can receive configuration data.
+type ConfigurableModule interface {
+	// Configure is called before Run to set up the module with configuration.
+	Configure(config interface{}) error
+	// Run starts the module with the provided context and metrics channel.
+	Run(ctx context.Context, ch chan<- metrics.Metric) error
+}
+
 // Registry holds all available metric collection modules.
 type Registry struct {
 	modules map[string]ModuleFunc

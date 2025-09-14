@@ -17,9 +17,7 @@ func TestDefaultConfig(t *testing.T) {
 	if config.Broker == "" {
 		t.Error("Expected broker to be set")
 	}
-	if config.ClientID == "" {
-		t.Error("Expected client ID to be set")
-	}
+	// ClientID is now empty by default and will be set at runtime if not provided
 	if config.Timeout == 0 {
 		t.Error("Expected timeout to be set")
 	}
