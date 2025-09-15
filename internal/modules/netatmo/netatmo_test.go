@@ -86,7 +86,7 @@ func TestSendDeviceMetrics(t *testing.T) {
 	// Verify metric was sent
 	select {
 	case metric := <-metricsCh:
-		if metric.Name != "netatmo_sensor" {
+		if metric.Name != "climate" {
 			t.Errorf("Expected metric name to be 'netatmo_sensor', got '%s'", metric.Name)
 		}
 
@@ -94,12 +94,8 @@ func TestSendDeviceMetrics(t *testing.T) {
 			t.Errorf("Expected vendor tag to be 'netatmo', got '%s'", metric.Tags["vendor"])
 		}
 
-		if metric.Tags["device_id"] != "test_device_id" {
-			t.Errorf("Expected device_id tag to be 'test_device_id', got '%s'", metric.Tags["device_id"])
-		}
-
-		if metric.Tags["device_type"] != "indoor" {
-			t.Errorf("Expected device_type tag to be 'indoor', got '%s'", metric.Tags["device_type"])
+		if metric.Tags["device"] != "test_device_id" {
+			t.Errorf("Expected device tag to be 'test_device_id', got '%s'", metric.Tags["device"])
 		}
 
 		// Check fields

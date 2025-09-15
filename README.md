@@ -232,7 +232,7 @@ Collects weather and climate data from Netatmo weather stations via the Netatmo 
    - The agent will automatically handle the rest!
 
 4. **Automatic Token Management**:
-   - **Tokens are stored securely** in `~/.config/metrics-agent/netatmo-tokens.json`
+   - **Tokens are stored securely** in `~/.config/metrics-agent/netatmo-storage.json`
    - **No need to re-authorize on each restart** - tokens are automatically loaded and refreshed
    - **Secure file permissions** (600) ensure only you can read the tokens
    - **Automatic token refresh** when they expire (every ~3 hours)
