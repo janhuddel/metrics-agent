@@ -13,6 +13,7 @@ import (
 
 // Run generates demo metrics every 5 seconds and sends them through the channel.
 // It runs until the context is cancelled.
+// Panic simulation: If file "/tmp/metrics-agent-panic-demo" exists, the module will panic.
 func Run(ctx context.Context, ch chan<- metrics.Metric) error {
 	host, _ := os.Hostname()
 	ticker := time.NewTicker(5 * time.Second)
@@ -26,6 +27,10 @@ func Run(ctx context.Context, ch chan<- metrics.Metric) error {
 		case <-ctx.Done():
 			return nil
 		case <-ticker.C:
+			// Check for panic trigger file before sending metric
+			if _, err := os.Stat("/tmp/metrics-agent-panic-demo"); err == nil {
+				panic("Demo module panic triggered by /tmp/metrics-agent-panic-demo file")
+			}
 			ch <- makeMetric(host)
 		}
 	}

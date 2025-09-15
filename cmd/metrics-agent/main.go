@@ -13,6 +13,7 @@ import (
 	"runtime"
 	"sync"
 	"syscall"
+	"time"
 
 	"github.com/janhuddel/metrics-agent/internal/config"
 	"github.com/janhuddel/metrics-agent/internal/metricchannel"
@@ -87,13 +88,13 @@ func main() {
 	}
 
 	// Run all modules in a single process
-	runAllModules()
+	runAllModules(globalConfig)
 }
 
 // runAllModules starts all registered modules concurrently in a single process.
 // It handles graceful shutdown on SIGTERM/SIGINT signals and module restart on SIGHUP.
 // Provides panic recovery for each module to ensure the process remains stable.
-func runAllModules() {
+func runAllModules(globalConfig *config.GlobalConfig) {
 	// Set up signal handling once
 	sigCh := make(chan os.Signal, 2)
 	signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGINT, syscall.SIGHUP)
@@ -133,19 +134,73 @@ func runAllModules() {
 
 		log.Printf("Starting %d modules: %v", len(moduleNames), moduleNames)
 
-		// Run all modules concurrently
+		// Log restart limit configuration
+		maxRestarts := 3 // Default value
+		if globalConfig != nil {
+			if globalConfig.ModuleRestartLimit == 0 {
+				maxRestarts = 0 // 0 means unlimited restarts
+			} else if globalConfig.ModuleRestartLimit > 0 {
+				maxRestarts = globalConfig.ModuleRestartLimit
+			}
+			// If ModuleRestartLimit < 0, use default (3)
+		}
+
+		if maxRestarts == 0 {
+			log.Printf("Module restart limit: unlimited")
+			log.Printf("WARNING: Unlimited restarts (limit=0) is NOT recommended for telegraf/systemd deployments!")
+		} else {
+			log.Printf("Module restart limit: %d", maxRestarts)
+		}
+
+		// Run all modules concurrently with individual restart capability
 		var wg sync.WaitGroup
 		for _, moduleName := range moduleNames {
 			wg.Add(1)
 			go func(name string) {
 				defer wg.Done()
-				utils.WithPanicRecoveryAndContinue("Module execution", name, func() {
-					log.Printf("[%s] starting module", name)
-					if err := modules.Global.Run(ctx, name, metricCh.Get()); err != nil {
-						log.Printf("[%s] module error: %v", name, err)
+
+				// Individual module restart loop with limit
+				restartCount := 0
+
+				for {
+					select {
+					case <-ctx.Done():
+						log.Printf("[%s] module stopped due to context cancellation", name)
+						return
+					default:
+						utils.WithPanicRecoveryAndContinue("Module execution", name, func() {
+							if maxRestarts == 0 {
+								log.Printf("[%s] starting module (attempt %d/unlimited)", name, restartCount+1)
+							} else {
+								log.Printf("[%s] starting module (attempt %d/%d)", name, restartCount+1, maxRestarts+1)
+							}
+							if err := modules.Global.Run(ctx, name, metricCh.Get()); err != nil {
+								log.Printf("[%s] module error: %v", name, err)
+							}
+							log.Printf("[%s] module stopped", name)
+						})
+
+						// Check if we should restart or exit
+						select {
+						case <-ctx.Done():
+							return
+						default:
+							restartCount++
+							if maxRestarts > 0 && restartCount >= maxRestarts {
+								log.Printf("[%s] module failed %d times, exiting program", name, restartCount)
+								// Signal other modules to stop and exit
+								cancel()
+								return
+							}
+							if maxRestarts == 0 {
+								log.Printf("[%s] restarting module after completion/panic (restart %d/unlimited)", name, restartCount)
+							} else {
+								log.Printf("[%s] restarting module after completion/panic (restart %d/%d)", name, restartCount, maxRestarts)
+							}
+							time.Sleep(1 * time.Second) // Brief delay before restart
+						}
 					}
-					log.Printf("[%s] module stopped", name)
-				})
+				}
 			}(moduleName)
 		}
 

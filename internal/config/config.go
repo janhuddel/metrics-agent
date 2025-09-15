@@ -47,6 +47,9 @@ type GlobalConfig struct {
 	// Global settings
 	LogLevel string `json:"log_level,omitempty"`
 
+	// Module restart settings
+	ModuleRestartLimit int `json:"module_restart_limit,omitempty"`
+
 	// Module-specific configurations
 	Modules map[string]ModuleConfig `json:"modules,omitempty"`
 }

@@ -1,5 +1,6 @@
 {
     "log_level": "info",
+    "module_restart_limit": 1,
     "modules": {
         "tasmota": {
             "friendly_name_overrides": {
