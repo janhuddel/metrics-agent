@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"sync"
 	"time"
 
 	mqtt "github.com/eclipse/paho.mqtt.golang"
@@ -14,18 +15,21 @@ import (
 
 // TasmotaModule handles MQTT connections and device discovery.
 type TasmotaModule struct {
-	config    Config
-	client    mqtt.Client
-	deviceMgr *DeviceManager
-	processor *SensorProcessor
-	metricsCh chan<- metrics.Metric
+	config           Config
+	client           mqtt.Client
+	deviceMgr        *DeviceManager
+	processor        *SensorProcessor
+	metricsCh        chan<- metrics.Metric
+	SubscribedTopics map[string]bool // Public for testing
+	SubscriptionMux  sync.RWMutex    // Public for testing
 }
 
 // NewTasmotaModule creates a new Tasmota module instance.
 func NewTasmotaModule(config Config) *TasmotaModule {
 	return &TasmotaModule{
-		config:    config,
-		deviceMgr: NewDeviceManager(),
+		config:           config,
+		deviceMgr:        NewDeviceManager(),
+		SubscribedTopics: make(map[string]bool),
 	}
 }
 

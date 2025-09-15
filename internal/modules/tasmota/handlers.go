@@ -32,11 +32,26 @@ func (tm *TasmotaModule) handleDiscoveryMessage(client mqtt.Client, msg mqtt.Mes
 // subscribeToSensorData subscribes to sensor data for a specific device.
 func (tm *TasmotaModule) subscribeToSensorData(deviceTopic string) {
 	sensorTopic := fmt.Sprintf("tele/%s/SENSOR", deviceTopic)
+
+	// Check if we're already subscribed to this topic
+	tm.SubscriptionMux.Lock()
+	if tm.SubscribedTopics[sensorTopic] {
+		tm.SubscriptionMux.Unlock()
+		log.Printf("Already subscribed to sensor topic: %s", sensorTopic)
+		return
+	}
+	tm.SubscribedTopics[sensorTopic] = true
+	tm.SubscriptionMux.Unlock()
+
 	token := tm.client.Subscribe(sensorTopic, 1, tm.createSensorHandler(deviceTopic))
 
 	// Handle subscription result asynchronously to avoid blocking the message handler
 	go func() {
 		if token.Wait() && token.Error() != nil {
+			// If subscription failed, remove from our tracking
+			tm.SubscriptionMux.Lock()
+			delete(tm.SubscribedTopics, sensorTopic)
+			tm.SubscriptionMux.Unlock()
 			log.Printf("Failed to subscribe to sensor topic %s: %v", sensorTopic, token.Error())
 		} else {
 			log.Printf("Subscribed to sensor topic: %s", sensorTopic)

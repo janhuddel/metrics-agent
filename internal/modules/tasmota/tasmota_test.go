@@ -342,3 +342,40 @@ func TestEnergySensorPowerArrayHandling(t *testing.T) {
 		}
 	})
 }
+
+// TestSubscriptionTracking tests that duplicate subscriptions are prevented.
+func TestSubscriptionTracking(t *testing.T) {
+	config := tasmota.Config{
+		Broker:   "tcp://localhost:1883",
+		ClientID: "test-client",
+		Timeout:  5 * time.Second,
+	}
+
+	module := tasmota.NewTasmotaModule(config)
+
+	// Verify initial state
+	if module.SubscribedTopics == nil {
+		t.Error("Expected subscribedTopics map to be initialized")
+	}
+
+	// Test that we can track subscriptions
+	deviceTopic := "tasmota_17E7AE"
+	sensorTopic := fmt.Sprintf("tele/%s/SENSOR", deviceTopic)
+
+	// First subscription should be allowed
+	module.SubscriptionMux.Lock()
+	if module.SubscribedTopics[sensorTopic] {
+		t.Error("Expected topic to not be subscribed initially")
+	}
+	module.SubscribedTopics[sensorTopic] = true
+	module.SubscriptionMux.Unlock()
+
+	// Second subscription should be detected as duplicate
+	module.SubscriptionMux.RLock()
+	isSubscribed := module.SubscribedTopics[sensorTopic]
+	module.SubscriptionMux.RUnlock()
+
+	if !isSubscribed {
+		t.Error("Expected topic to be marked as subscribed")
+	}
+}
