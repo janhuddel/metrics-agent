@@ -26,6 +26,7 @@ type OAuth2Config struct {
 	RedirectURI  string
 	Scope        string
 	State        string
+	Hostname     string // Optional hostname/IP for redirect URI (defaults to localhost)
 }
 
 // OAuth2Token represents an OAuth2 token response.
@@ -54,6 +55,11 @@ func NewOAuth2Client(config OAuth2Config, moduleName string) (*OAuth2Client, err
 		config:  config,
 		storage: storage,
 	}, nil
+}
+
+// GetConfig returns the OAuth2 configuration (for testing purposes).
+func (c *OAuth2Client) GetConfig() OAuth2Config {
+	return c.config
 }
 
 // Authenticate performs OAuth2 authentication using Authorization Code flow.
@@ -106,7 +112,13 @@ func (c *OAuth2Client) performWebAuthorization(ctx context.Context) (string, str
 	defer listener.Close()
 
 	port := listener.Addr().(*net.TCPAddr).Port
-	redirectURI := fmt.Sprintf("http://localhost:%d/callback", port)
+
+	// Use configured hostname or default to localhost
+	hostname := c.config.Hostname
+	if hostname == "" {
+		hostname = "localhost"
+	}
+	redirectURI := fmt.Sprintf("http://%s:%d/callback", hostname, port)
 
 	// Create authorization URL
 	authURL := fmt.Sprintf("%s?client_id=%s&redirect_uri=%s&scope=%s&response_type=code&state=%s",
@@ -211,12 +223,12 @@ func (c *OAuth2Client) performWebAuthorization(ctx context.Context) (string, str
 
 	// Open browser automatically
 	log.Printf("Opening browser for authorization...")
-	log.Printf("If the browser doesn't open automatically, please visit: http://localhost:%d", port)
+	log.Printf("If the browser doesn't open automatically, please visit: http://%s:%d", hostname, port)
 
 	// Try to open browser
-	if err := openBrowser(fmt.Sprintf("http://localhost:%d", port)); err != nil {
+	if err := openBrowser(fmt.Sprintf("http://%s:%d", hostname, port)); err != nil {
 		log.Printf("Could not open browser automatically: %v", err)
-		log.Printf("Please manually open: http://localhost:%d", port)
+		log.Printf("Please manually open: http://%s:%d", hostname, port)
 	}
 
 	// Wait for authorization code or error

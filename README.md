@@ -196,6 +196,9 @@ Collects weather and climate data from Netatmo weather stations via the Netatmo 
 - `client_secret`: Netatmo API client secret (required)
 - `timeout`: HTTP request timeout (default: `30s`)
 - `interval`: Data collection interval (default: `5m`)
+- `hostname`: Hostname or IP address for OAuth redirect URI (default: `localhost`)
+  - Use this when running on a production system where you need to specify the actual IP address
+  - Example: `"hostname": "192.168.1.100"` for a specific IP address
 
 #### Setup
 
@@ -206,6 +209,8 @@ Collects weather and climate data from Netatmo weather stations via the Netatmo 
    - **Important**: Set the **Redirect URI** to `https://dev.netatmo.com/` (required even for embedded server flow)
 
 2. **Configure the Module**:
+   
+   For local development:
    ```json
    {
      "modules": {
@@ -219,6 +224,27 @@ Collects weather and climate data from Netatmo weather stations via the Netatmo 
            "client_secret": "your_netatmo_client_secret",
            "timeout": "30s",
            "interval": "5m"
+         }
+       }
+     }
+   }
+   ```
+
+   For production deployment (when you need to specify the host IP):
+   ```json
+   {
+     "modules": {
+       "netatmo": {
+         "friendly_name_overrides": {
+           "70:ee:50:xx:xx:xx": "Indoor Station",
+           "02:00:00:xx:xx:xx": "Outdoor Module"
+         },
+         "custom": {
+           "client_id": "your_netatmo_client_id",
+           "client_secret": "your_netatmo_client_secret",
+           "timeout": "30s",
+           "interval": "5m",
+           "hostname": "192.168.1.100"
          }
        }
      }

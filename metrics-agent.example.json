@@ -23,7 +23,8 @@
                 "client_id": "your_netatmo_client_id",
                 "client_secret": "your_netatmo_client_secret",
                 "timeout": "30s",
-                "interval": "5m"
+                "interval": "5m",
+                "hostname": "192.168.1.100"
             }
         }
     }

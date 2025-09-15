@@ -470,6 +470,7 @@ func (tdg *TestDataGenerator) CreateTestOAuth2Config() OAuth2Config {
 		RedirectURI:  "http://localhost:8080/callback",
 		Scope:        "read write",
 		State:        "test-state",
+		Hostname:     "localhost",
 	}
 }
 

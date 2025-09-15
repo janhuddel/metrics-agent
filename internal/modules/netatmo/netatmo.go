@@ -21,6 +21,7 @@ type Config struct {
 	ClientSecret string `json:"client_secret"`
 	Timeout      string `json:"timeout"`
 	Interval     string `json:"interval"`
+	Hostname     string `json:"hostname"` // Optional hostname/IP for OAuth redirect URI
 }
 
 // NetatmoModule handles Netatmo API authentication and data collection
@@ -115,6 +116,7 @@ func NewNetatmoModule(config Config) (*NetatmoModule, error) {
 		TokenURL:     "https://api.netatmo.com/oauth2/token",
 		Scope:        "read_station",
 		State:        "netatmo_auth",
+		Hostname:     config.Hostname,
 	}
 
 	oauth2Client, err := utils.NewOAuth2Client(oauth2Config, "netatmo")
