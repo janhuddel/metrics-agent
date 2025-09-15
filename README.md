@@ -136,20 +136,23 @@ Add the following to your Telegraf configuration:
 
 ### Systemd Service (Linux)
 
-Create a systemd service file at `/etc/systemd/system/metrics-agent.service`:
+The metrics-agent runs under Telegraf's management via `inputs.execd`. Configure systemd to manage Telegraf:
+
+Create or edit the systemd service file at `/etc/systemd/system/telegraf.service`:
 
 ```ini
 [Unit]
-Description=Metrics Agent
+Description=Telegraf Data Collector
 After=network.target
 
 [Service]
 Type=simple
 User=telegraf
 Group=telegraf
-ExecStart=/usr/local/bin/metrics-agent -c /etc/metrics-agent/metrics-agent.json
+ExecStart=/usr/bin/telegraf --config /etc/telegraf/telegraf.conf
 Restart=always
-RestartSec=10
+RestartSec=10s
+KillMode=mixed
 StandardOutput=journal
 StandardError=journal
 
@@ -161,9 +164,11 @@ Enable and start the service:
 
 ```bash
 sudo systemctl daemon-reload
-sudo systemctl enable metrics-agent
-sudo systemctl start metrics-agent
+sudo systemctl enable telegraf
+sudo systemctl start telegraf
 ```
+
+**Note**: The metrics-agent process is automatically managed by Telegraf's `inputs.execd` plugin and doesn't need its own systemd service.
 
 ## Available Modules
 
