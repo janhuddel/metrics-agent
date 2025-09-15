@@ -186,6 +186,102 @@ Collects metrics from Tasmota devices via MQTT.
 - `keep_alive`: Keep-alive interval (default: `60s`)
 - `ping_timeout`: Ping timeout (default: `10s`)
 
+### Netatmo Module
+
+Collects weather and climate data from Netatmo weather stations via the Netatmo API.
+
+#### Configuration Options
+
+- `client_id`: Netatmo API client ID (required)
+- `client_secret`: Netatmo API client secret (required)
+- `timeout`: HTTP request timeout (default: `30s`)
+- `interval`: Data collection interval (default: `5m`)
+
+#### Setup
+
+1. **Create a Netatmo Developer Account**:
+   - Go to [https://dev.netatmo.com/](https://dev.netatmo.com/)
+   - Create an account and log in
+   - Create a new application to get your `client_id` and `client_secret`
+   - **Important**: Set the **Redirect URI** to `https://dev.netatmo.com/` (required even for embedded server flow)
+
+2. **Configure the Module**:
+   ```json
+   {
+     "modules": {
+       "netatmo": {
+         "friendly_name_overrides": {
+           "70:ee:50:xx:xx:xx": "Indoor Station",
+           "02:00:00:xx:xx:xx": "Outdoor Module"
+         },
+         "custom": {
+           "client_id": "your_netatmo_client_id",
+           "client_secret": "your_netatmo_client_secret",
+           "timeout": "30s",
+           "interval": "5m"
+         }
+       }
+     }
+   }
+   ```
+
+3. **Easy Authorization**:
+   - Start the metrics agent: `./metrics-agent -c metrics-agent.json`
+   - The agent will automatically open your browser for authorization
+   - Log in to your Netatmo account and authorize the application
+   - The agent will automatically handle the rest!
+
+4. **Automatic Token Management**:
+   - **Tokens are stored securely** in `~/.config/metrics-agent/netatmo-tokens.json`
+   - **No need to re-authorize on each restart** - tokens are automatically loaded and refreshed
+   - **Secure file permissions** (600) ensure only you can read the tokens
+   - **Automatic token refresh** when they expire (every ~3 hours)
+
+#### Metrics Collected
+
+The module collects the following metrics from your Netatmo weather station:
+
+**Indoor Station** (`device_type: indoor`):
+- `temperature`: Indoor temperature in Celsius
+- `humidity`: Indoor humidity percentage
+- `co2`: CO2 level in ppm
+- `noise`: Noise level in dB
+- `pressure`: Atmospheric pressure in mbar
+- `absolute_pressure`: Absolute pressure in mbar
+- `min_temp`: Minimum temperature today
+- `max_temp`: Maximum temperature today
+- `temp_trend`: Temperature trend (up/down/stable)
+- `pressure_trend`: Pressure trend (up/down/stable)
+
+**Outdoor Module** (`device_type: outdoor`):
+- `temperature`: Outdoor temperature in Celsius
+- `humidity`: Outdoor humidity percentage
+- `min_temp`: Minimum temperature today
+- `max_temp`: Maximum temperature today
+- `temp_trend`: Temperature trend (up/down/stable)
+
+**Rain Module** (`device_type: rain`):
+- `rain`: Current rain level in mm
+- `rain_1h`: Rain in the last hour in mm
+- `rain_24h`: Rain in the last 24 hours in mm
+
+**Wind Module** (`device_type: wind`):
+- `wind_strength`: Wind strength in km/h
+- `wind_angle`: Wind direction in degrees
+- `gust_strength`: Gust strength in km/h
+- `gust_angle`: Gust direction in degrees
+
+#### Authentication
+
+The module uses OAuth2 Authorization Code flow with an **embedded web server** for seamless authentication. The agent automatically opens your browser, handles the authorization flow, and stores tokens securely. No manual URL copying or authorization code handling required!
+
+#### Example Output
+
+```
+climate,device_id=70:ee:50:xx:xx:xx,device_name=Indoor Station,device_type=indoor,vendor=netatmo temperature=22.5,humidity=65,co2=450,pressure=1013.25 1634234234000000000
+climate,device_id=02:00:00:xx:xx:xx,device_name=Outdoor Module,device_type=outdoor,vendor=netatmo temperature=18.2,humidity=72 1634234234000000000
+```
+
 ### Demo Module
 
 A demonstration module for testing and development purposes. Includes panic simulation capabilities for testing the recovery mechanism.

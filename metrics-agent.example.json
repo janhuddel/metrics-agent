@@ -8,10 +8,22 @@
                 "tasmota_6886BC.1": "Wärmepumpe"
             },
             "custom": {
-                "broker": "tcp://mqtt.intra.rohwer.sh:1883",
+                "broker": "tcp://localost:1883",
                 "timeout": "30s",
                 "keep_alive": "60s",
                 "ping_timeout": "10s"
+            }
+        },
+        "netatmo": {
+            "friendly_name_overrides": {
+                "70:ee:50:xx:xx:xx": "Indoor Station",
+                "02:00:00:xx:xx:xx": "Outdoor Module"
+            },
+            "custom": {
+                "client_id": "your_netatmo_client_id",
+                "client_secret": "your_netatmo_client_secret",
+                "timeout": "30s",
+                "interval": "5m"
             }
         }
     }
