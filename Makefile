@@ -33,7 +33,6 @@ clean:
 ## Cross-Compile Release-Binaries
 release: clean
 	@mkdir -p $(BUILDDIR)
-	GOOS=linux   GOARCH=amd64 go build $(LDFLAGS) -o $(BUILDDIR)/$(BINARY)-linux-amd64 $(PKG)
-	GOOS=darwin  GOARCH=arm64 go build $(LDFLAGS) -o $(BUILDDIR)/$(BINARY)-darwin-arm64 $(PKG)
-	GOOS=windows GOARCH=amd64 go build $(LDFLAGS) -o $(BUILDDIR)/$(BINARY)-windows-amd64.exe $(PKG)
+	GOOS=linux   GOARCH=amd64   go build $(LDFLAGS) -o $(BUILDDIR)/$(BINARY)-linux-amd64 $(PKG)
+	GOOS=linux   GOARCH=arm64   go build $(LDFLAGS) -o $(BUILDDIR)/$(BINARY)-linux-arm64 $(PKG)
 	@echo "Release artifacts in $(BUILDDIR)"

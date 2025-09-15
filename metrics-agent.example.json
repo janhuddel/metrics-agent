@@ -1,0 +1,17 @@
+{
+    "log_level": "info",
+    "modules": {
+        "tasmota": {
+            "friendly_name_overrides": {
+                "tasmota_6886BC.0": "Filteranlage",
+                "tasmota_6886BC.1": "Wärmepumpe"
+            },
+            "custom": {
+                "broker": "tcp://mqtt.intra.rohwer.sh:1883",
+                "timeout": "30s",
+                "keep_alive": "60s",
+                "ping_timeout": "10s"
+            }
+        }
+    }
+}
