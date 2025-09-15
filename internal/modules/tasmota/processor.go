@@ -21,9 +21,12 @@ const (
 	fieldCurrent = "Current"
 	fieldToday   = "Today"
 	fieldTotal   = "Total"
+	fieldEIn     = "E_in"
+	fieldEOut    = "E_out"
 
 	// Sensor types
 	sensorTypeEnergy = "ENERGY"
+	sensorTypeMT175  = "MT175"
 
 	// Metric names
 	metricNameElectricity = "electricity"
@@ -138,44 +141,24 @@ func (sp *SensorProcessor) ProcessSensorData(device *DeviceInfo, sensorData map[
 	utils.WithPanicRecoveryAndContinue("Sensor processor", device.T, func() {
 		timestamp := time.Now()
 
-		// Find and process the ENERGY sensor type only
+		// Find and process the sensor types
 		for sensorType, data := range sensorData {
-			if sensorType == sensorTypeEnergy {
+			switch sensorType {
+			case sensorTypeEnergy:
 				if energyData, ok := data.(map[string]any); ok {
 					sp.processEnergySensor(device, sensorType, energyData, timestamp)
 				} else {
 					log.Printf("Warning: invalid data format for %s sensor type on device %s", sensorTypeEnergy, device.T)
 				}
+			case sensorTypeMT175:
+				if mt175Data, ok := data.(map[string]any); ok {
+					sp.processMT175Sensor(device, sensorType, mt175Data, timestamp)
+				} else {
+					log.Printf("Warning: invalid data format for %s sensor type on device %s", sensorTypeMT175, device.T)
+				}
 			}
 		}
 	})
-}
-
-// fetchEnergyTotals fetches energy totals from a multi-channel device via HTTP
-func (sp *SensorProcessor) fetchEnergyTotals(device *DeviceInfo) (*EnergyTotalResponse, error) {
-	url := fmt.Sprintf("http://%s/cm?cmnd=EnergyTotal", device.IP)
-
-	resp, err := sp.httpClient.Get(url)
-	if err != nil {
-		return nil, fmt.Errorf("failed to fetch energy totals: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("HTTP request failed with status: %d", resp.StatusCode)
-	}
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read response body: %w", err)
-	}
-
-	var energyTotal EnergyTotalResponse
-	if err := json.Unmarshal(body, &energyTotal); err != nil {
-		return nil, fmt.Errorf("failed to parse JSON response: %w", err)
-	}
-
-	return &energyTotal, nil
 }
 
 // processEnergySensor processes the ENERGY sensor type.
@@ -197,6 +180,33 @@ func (sp *SensorProcessor) processEnergySensor(device *DeviceInfo, sensorType st
 		default:
 			log.Printf("Warning: unexpected %s field type for device %s: %T", fieldPower, device.T, powerData)
 		}
+	})
+}
+
+// processMT175Sensor processes the MT175 sensor type.
+func (sp *SensorProcessor) processMT175Sensor(device *DeviceInfo, sensorType string, mt175Data map[string]any, timestamp time.Time) {
+	utils.WithPanicRecoveryAndContinue("Sensor type processor", device.T, func() {
+		tags := sp.createBaseTags(device, "")
+
+		powerValue, exists := mt175Data[fieldPower]
+		if !exists {
+			log.Printf("Warning: %s field not found in %s sensor data for device %s", fieldPower, sensorTypeMT175, device.T)
+			return
+		}
+
+		fields := map[string]any{
+			"power": powerValue,
+		}
+
+		if e_in, exists := mt175Data[fieldEIn]; exists {
+			fields["sum_power_total"] = sp.fieldProcessor.convertWhToKwh(e_in)
+		}
+
+		if e_out, exists := mt175Data[fieldEOut]; exists {
+			fields["sum_power_total_out"] = sp.fieldProcessor.convertWhToKwh(e_out)
+		}
+
+		sp.sendPowerMetric(device, tags, fields, timestamp)
 	})
 }
 
@@ -294,6 +304,33 @@ func (sp *SensorProcessor) sendPowerMetric(device *DeviceInfo, tags map[string]s
 	case <-time.After(metricSendTimeout):
 		log.Printf("Warning: metric channel full, dropping metric for device %s", device.T)
 	}
+}
+
+// fetchEnergyTotals fetches energy totals from a multi-channel device via HTTP
+func (sp *SensorProcessor) fetchEnergyTotals(device *DeviceInfo) (*EnergyTotalResponse, error) {
+	url := fmt.Sprintf("http://%s/cm?cmnd=EnergyTotal", device.IP)
+
+	resp, err := sp.httpClient.Get(url)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch energy totals: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("HTTP request failed with status: %d", resp.StatusCode)
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response body: %w", err)
+	}
+
+	var energyTotal EnergyTotalResponse
+	if err := json.Unmarshal(body, &energyTotal); err != nil {
+		return nil, fmt.Errorf("failed to parse JSON response: %w", err)
+	}
+
+	return &energyTotal, nil
 }
 
 // SetMetricsChannel sets the metrics channel for testing.

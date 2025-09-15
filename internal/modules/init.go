@@ -4,7 +4,6 @@
 package modules
 
 import (
-	"github.com/janhuddel/metrics-agent/internal/modules/demo"
 	"github.com/janhuddel/metrics-agent/internal/modules/tasmota"
 )
 
@@ -13,6 +12,6 @@ var Global = NewRegistry()
 
 func init() {
 	// Register all available modules
-	Global.Register("demo", demo.Run)
+	//Global.Register("demo", demo.Run)
 	Global.Register("tasmota", tasmota.Run)
 }
