@@ -69,7 +69,7 @@ func (r *Registry) Run(ctx context.Context, name string, ch chan<- metrics.Metri
 	// Execute module with panic recovery
 	defer func() {
 		if r := recover(); r != nil {
-			// Panic is handled by the caller (supervisor or worker)
+			// Panic is handled by the caller (main process)
 			panic(r)
 		}
 	}()

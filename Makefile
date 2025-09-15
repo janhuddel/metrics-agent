@@ -1,5 +1,5 @@
 # Name des finalen Binaries
-BINARY=metric-agent
+BINARY=metrics-agent
 # Pfad zum main-Package
 PKG=github.com/janhuddel/metrics-agent/cmd/metrics-agent
 # Build-Verzeichnis
