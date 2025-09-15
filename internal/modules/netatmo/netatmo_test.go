@@ -1,14 +1,16 @@
 package netatmo
 
 import (
-	"context"
 	"testing"
 	"time"
 
 	"github.com/janhuddel/metrics-agent/internal/metrics"
+	"github.com/janhuddel/metrics-agent/internal/utils"
 )
 
 func TestNetatmoModule(t *testing.T) {
+	tah := utils.NewTestAssertionHelper()
+
 	// Create a test configuration
 	config := Config{
 		ClientID:     "test_client_id",
@@ -19,9 +21,7 @@ func TestNetatmoModule(t *testing.T) {
 
 	// Create module instance
 	module, err := NewNetatmoModule(config)
-	if err != nil {
-		t.Fatalf("Failed to create Netatmo module: %v", err)
-	}
+	tah.AssertNoError(t, err, "Failed to create Netatmo module")
 
 	// Verify configuration is set correctly
 	if module.config.ClientID != "test_client_id" {
@@ -58,15 +58,15 @@ func TestLoadConfig(t *testing.T) {
 }
 
 func TestSendDeviceMetrics(t *testing.T) {
+	tah := utils.NewTestAssertionHelper()
+
 	// Create a test module
 	config := Config{
 		ClientID:     "test_client_id",
 		ClientSecret: "test_client_secret",
 	}
 	module, err := NewNetatmoModule(config)
-	if err != nil {
-		t.Fatalf("Failed to create Netatmo module: %v", err)
-	}
+	tah.AssertNoError(t, err, "Failed to create Netatmo module")
 
 	// Create a metrics channel
 	metricsCh := make(chan metrics.Metric, 10)
@@ -121,8 +121,11 @@ func TestSendDeviceMetrics(t *testing.T) {
 }
 
 func TestRunWithCancellation(t *testing.T) {
+	tah := utils.NewTestAssertionHelper()
+	tch := utils.NewTestContextHelper()
+
 	// Create a context that will be cancelled quickly
-	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	ctx, cancel := tch.CreateTestContextWithTimeout(100 * time.Millisecond)
 	defer cancel()
 
 	// Create a metrics channel
@@ -131,7 +134,5 @@ func TestRunWithCancellation(t *testing.T) {
 	// This should return quickly due to context cancellation
 	// We expect it to fail during authentication since we don't have real credentials
 	err := Run(ctx, metricsCh)
-	if err == nil {
-		t.Error("Expected Run to return an error due to authentication failure")
-	}
+	tah.AssertError(t, err, "Expected Run to return an error due to authentication failure")
 }

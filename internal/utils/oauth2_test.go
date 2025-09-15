@@ -12,15 +12,14 @@ import (
 
 // createTestOAuth2Client creates an OAuth2Client with real storage for testing
 func createTestOAuth2Client(config OAuth2Config) *OAuth2Client {
-	// Create a real storage instance for testing
-	storage, _ := NewStorage("test-oauth2")
-	return &OAuth2Client{
-		config:  config,
-		storage: storage,
-	}
+	th := NewTestHelper()
+	return th.CreateOAuth2TestClient(config)
 }
 
 func TestNewOAuth2Client(t *testing.T) {
+	tdg := NewTestDataGenerator()
+	tah := NewTestAssertionHelper()
+
 	tests := []struct {
 		name        string
 		config      OAuth2Config
@@ -28,30 +27,14 @@ func TestNewOAuth2Client(t *testing.T) {
 		expectError bool
 	}{
 		{
-			name: "valid config",
-			config: OAuth2Config{
-				ClientID:     "test-client-id",
-				ClientSecret: "test-client-secret",
-				AuthURL:      "https://example.com/auth",
-				TokenURL:     "https://example.com/token",
-				RedirectURI:  "http://localhost:8080/callback",
-				Scope:        "read write",
-				State:        "test-state",
-			},
+			name:        "valid config",
+			config:      tdg.CreateTestOAuth2Config(),
 			moduleName:  "test-module",
 			expectError: false,
 		},
 		{
-			name: "empty module name",
-			config: OAuth2Config{
-				ClientID:     "test-client-id",
-				ClientSecret: "test-client-secret",
-				AuthURL:      "https://example.com/auth",
-				TokenURL:     "https://example.com/token",
-				RedirectURI:  "http://localhost:8080/callback",
-				Scope:        "read write",
-				State:        "test-state",
-			},
+			name:        "empty module name",
+			config:      tdg.CreateTestOAuth2Config(),
 			moduleName:  "",
 			expectError: false,
 		},
@@ -61,29 +44,14 @@ func TestNewOAuth2Client(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			client, err := NewOAuth2Client(tt.config, tt.moduleName)
 			if tt.expectError {
-				if err == nil {
-					t.Errorf("Expected error but got none")
-				}
+				tah.AssertError(t, err, "Expected error but got none")
 				return
 			}
 
-			if err != nil {
-				t.Errorf("Unexpected error: %v", err)
-				return
-			}
-
-			if client == nil {
-				t.Errorf("Expected client but got nil")
-				return
-			}
-
-			if client.config != tt.config {
-				t.Errorf("Expected config %+v, got %+v", tt.config, client.config)
-			}
-
-			if client.storage == nil {
-				t.Errorf("Expected storage to be initialized")
-			}
+			tah.AssertNoError(t, err, "Unexpected error")
+			tah.AssertNotNil(t, client, "Expected client but got nil")
+			tah.AssertOAuth2ConfigEqual(t, tt.config, client.config, "Config mismatch")
+			tah.AssertNotNil(t, client.storage, "Expected storage to be initialized")
 
 			// Clean up
 			if client.storage != nil {
@@ -94,27 +62,18 @@ func TestNewOAuth2Client(t *testing.T) {
 }
 
 func TestOAuth2Client_StoreToken(t *testing.T) {
-	client := createTestOAuth2Client(OAuth2Config{
-		ClientID: "test-client-id",
-	})
+	tdg := NewTestDataGenerator()
+	tah := NewTestAssertionHelper()
 
-	token := &OAuth2Token{
-		AccessToken:  "access-token-123",
-		RefreshToken: "refresh-token-456",
-		ExpiresIn:    3600,
-		ExpiresAt:    time.Now().Add(time.Hour),
-	}
+	client := createTestOAuth2Client(tdg.CreateTestOAuth2ConfigWithClientID("test-client-id"))
+	token := tdg.CreateValidTestToken()
 
 	err := client.storeToken(token)
-	if err != nil {
-		t.Errorf("storeToken failed: %v", err)
-	}
+	tah.AssertNoError(t, err, "storeToken failed")
 
 	// Verify token was stored
 	storedData := client.storage.Get("oauth2_token")
-	if storedData == nil {
-		t.Errorf("Expected token to be stored")
-	}
+	tah.AssertNotNil(t, storedData, "Expected token to be stored")
 
 	data, ok := storedData.(map[string]interface{})
 	if !ok {
@@ -136,6 +95,9 @@ func TestOAuth2Client_StoreToken(t *testing.T) {
 }
 
 func TestOAuth2Client_LoadStoredToken(t *testing.T) {
+	tdg := NewTestDataGenerator()
+	tah := NewTestAssertionHelper()
+
 	tests := []struct {
 		name          string
 		storedData    map[string]interface{}
@@ -205,9 +167,7 @@ func TestOAuth2Client_LoadStoredToken(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			client := createTestOAuth2Client(OAuth2Config{
-				ClientID: tt.clientID,
-			})
+			client := createTestOAuth2Client(tdg.CreateTestOAuth2ConfigWithClientID(tt.clientID))
 			defer os.Remove(client.storage.GetFilePath())
 
 			// Clear any existing data first
@@ -221,41 +181,28 @@ func TestOAuth2Client_LoadStoredToken(t *testing.T) {
 			token, err := client.loadStoredToken()
 
 			if tt.expectError {
-				if err == nil {
-					t.Errorf("Expected error but got none")
-				}
+				tah.AssertError(t, err, "Expected error but got none")
 				return
 			}
 
-			if err != nil {
-				t.Errorf("Unexpected error: %v", err)
-				return
-			}
+			tah.AssertNoError(t, err, "Unexpected error")
 
 			if tt.expectToken {
-				if token == nil {
-					t.Errorf("Expected token but got nil")
-					return
-				}
-
+				tah.AssertNotNil(t, token, "Expected token but got nil")
 				if tt.expectedToken != nil {
-					if token.AccessToken != tt.expectedToken.AccessToken {
-						t.Errorf("Expected access_token %s, got %s", tt.expectedToken.AccessToken, token.AccessToken)
-					}
-					if token.RefreshToken != tt.expectedToken.RefreshToken {
-						t.Errorf("Expected refresh_token %s, got %s", tt.expectedToken.RefreshToken, token.RefreshToken)
-					}
+					tah.AssertOAuth2TokenEqual(t, tt.expectedToken, token, "Token mismatch")
 				}
 			} else {
-				if token != nil {
-					t.Errorf("Expected no token but got %+v", token)
-				}
+				tah.AssertNil(t, token, "Expected no token but got one")
 			}
 		})
 	}
 }
 
 func TestOAuth2Client_ExchangeAuthorizationCode(t *testing.T) {
+	tdg := NewTestDataGenerator()
+	tah := NewTestAssertionHelper()
+
 	tests := []struct {
 		name           string
 		authCode       string
@@ -340,41 +287,20 @@ func TestOAuth2Client_ExchangeAuthorizationCode(t *testing.T) {
 			}))
 			defer server.Close()
 
-			client := createTestOAuth2Client(OAuth2Config{
-				ClientID:     "test-client-id",
-				ClientSecret: "test-client-secret",
-				TokenURL:     server.URL,
-			})
+			client := createTestOAuth2Client(tdg.CreateTestOAuth2ConfigWithTokenURL(server.URL))
 
 			token, err := client.exchangeAuthorizationCode(tt.authCode, tt.redirectURI)
 
 			if tt.expectError {
-				if err == nil {
-					t.Errorf("Expected error but got none")
-				}
+				tah.AssertError(t, err, "Expected error but got none")
 				return
 			}
 
-			if err != nil {
-				t.Errorf("Unexpected error: %v", err)
-				return
-			}
-
-			if token == nil {
-				t.Errorf("Expected token but got nil")
-				return
-			}
+			tah.AssertNoError(t, err, "Unexpected error")
+			tah.AssertNotNil(t, token, "Expected token but got nil")
 
 			if tt.expectedToken != nil {
-				if token.AccessToken != tt.expectedToken.AccessToken {
-					t.Errorf("Expected access_token %s, got %s", tt.expectedToken.AccessToken, token.AccessToken)
-				}
-				if token.RefreshToken != tt.expectedToken.RefreshToken {
-					t.Errorf("Expected refresh_token %s, got %s", tt.expectedToken.RefreshToken, token.RefreshToken)
-				}
-				if token.ExpiresIn != tt.expectedToken.ExpiresIn {
-					t.Errorf("Expected expires_in %d, got %d", tt.expectedToken.ExpiresIn, token.ExpiresIn)
-				}
+				tah.AssertOAuth2TokenEqual(t, tt.expectedToken, token, "Token mismatch")
 
 				// Check that ExpiresAt is set (should be approximately now + expires_in)
 				expectedExpiry := time.Now().Add(time.Duration(token.ExpiresIn) * time.Second)
@@ -534,29 +460,20 @@ func TestOAuth2Client_PerformWebAuthorization(t *testing.T) {
 }
 
 func TestOAuth2Client_Authenticate_WithValidStoredToken(t *testing.T) {
-	client := createTestOAuth2Client(OAuth2Config{
-		ClientID: "test-client-id",
-	})
+	tdg := NewTestDataGenerator()
+	tah := NewTestAssertionHelper()
+
+	client := createTestOAuth2Client(tdg.CreateTestOAuth2ConfigWithClientID("test-client-id"))
 
 	// Store a valid token
-	validToken := &OAuth2Token{
-		AccessToken:  "access-token-123",
-		RefreshToken: "refresh-token-456",
-		ExpiresAt:    time.Now().Add(time.Hour), // Valid for 1 hour
-	}
+	validToken := tdg.CreateValidTestToken()
 	client.storeToken(validToken)
 
 	ctx := context.Background()
 	token, err := client.Authenticate(ctx)
 
-	if err != nil {
-		t.Errorf("Unexpected error: %v", err)
-	}
-
-	if token == nil {
-		t.Errorf("Expected token but got nil")
-		return
-	}
+	tah.AssertNoError(t, err, "Unexpected error")
+	tah.AssertNotNil(t, token, "Expected token but got nil")
 
 	if token.AccessToken != validToken.AccessToken {
 		t.Errorf("Expected access_token %s, got %s", validToken.AccessToken, token.AccessToken)
@@ -564,6 +481,9 @@ func TestOAuth2Client_Authenticate_WithValidStoredToken(t *testing.T) {
 }
 
 func TestOAuth2Client_Authenticate_WithExpiredStoredToken(t *testing.T) {
+	tdg := NewTestDataGenerator()
+	tah := NewTestAssertionHelper()
+
 	// Create test server for token refresh
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		response := `{
@@ -576,31 +496,17 @@ func TestOAuth2Client_Authenticate_WithExpiredStoredToken(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := createTestOAuth2Client(OAuth2Config{
-		ClientID:     "test-client-id",
-		ClientSecret: "test-client-secret",
-		TokenURL:     server.URL,
-	})
+	client := createTestOAuth2Client(tdg.CreateTestOAuth2ConfigWithTokenURL(server.URL))
 
 	// Store an expired token
-	expiredToken := &OAuth2Token{
-		AccessToken:  "access-token-123",
-		RefreshToken: "refresh-token-456",
-		ExpiresAt:    time.Now().Add(-time.Hour), // Expired 1 hour ago
-	}
+	expiredToken := tdg.CreateExpiredTestToken()
 	client.storeToken(expiredToken)
 
 	ctx := context.Background()
 	token, err := client.Authenticate(ctx)
 
-	if err != nil {
-		t.Errorf("Unexpected error: %v", err)
-	}
-
-	if token == nil {
-		t.Errorf("Expected token but got nil")
-		return
-	}
+	tah.AssertNoError(t, err, "Unexpected error")
+	tah.AssertNotNil(t, token, "Expected token but got nil")
 
 	// Should get the refreshed token
 	if token.AccessToken != "new-access-token-789" {
@@ -609,27 +515,24 @@ func TestOAuth2Client_Authenticate_WithExpiredStoredToken(t *testing.T) {
 }
 
 func TestOAuth2Client_Authenticate_WithInvalidStoredToken(t *testing.T) {
-	client := createTestOAuth2Client(OAuth2Config{
-		ClientID: "test-client-id",
-	})
+	tdg := NewTestDataGenerator()
+	tah := NewTestAssertionHelper()
+	tch := NewTestContextHelper()
+
+	client := createTestOAuth2Client(tdg.CreateTestOAuth2ConfigWithClientID("test-client-id"))
 
 	// Store invalid token data
 	client.storage.Set("oauth2_token", "invalid-data")
 
-	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	ctx, cancel := tch.CreateTestContextWithTimeout(100 * time.Millisecond)
 	defer cancel()
 
 	// Should attempt web authorization (which will timeout due to context)
 	_, err := client.Authenticate(ctx)
 
 	// Should get context-related error
-	if err == nil {
-		t.Errorf("Expected error due to context timeout")
-	}
-
-	if !strings.Contains(err.Error(), "context") {
-		t.Errorf("Expected context-related error, got: %v", err)
-	}
+	tah.AssertError(t, err, "Expected error due to context timeout")
+	tah.AssertErrorContains(t, err, "context", "Expected context-related error")
 }
 
 // TestOAuth2Client_ForceRefresh tests the ForceRefresh method

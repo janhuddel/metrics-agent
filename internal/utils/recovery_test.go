@@ -11,22 +11,8 @@ import (
 
 // captureLogOutput captures log output for testing
 func captureLogOutput(fn func()) string {
-	// Create a pipe to capture log output
-	r, w, _ := os.Pipe()
-	originalOutput := log.Writer()
-	log.SetOutput(w)
-
-	// Run the function
-	fn()
-
-	// Close the writer and restore original output
-	w.Close()
-	log.SetOutput(originalOutput)
-
-	// Read the captured output
-	buf := make([]byte, 1024)
-	n, _ := r.Read(buf)
-	return string(buf[:n])
+	tlc := NewTestLogCapture()
+	return tlc.CaptureLogOutput(fn)
 }
 
 func TestWithPanicRecoveryAndContinue(t *testing.T) {
@@ -159,6 +145,8 @@ func TestWithPanicRecoveryAndContinue(t *testing.T) {
 }
 
 func TestWithPanicRecoveryAndReturnError(t *testing.T) {
+	tah := NewTestAssertionHelper()
+
 	tests := []struct {
 		name           string
 		operation      string
@@ -284,15 +272,12 @@ func TestWithPanicRecoveryAndReturnError(t *testing.T) {
 
 				// Check error result
 				if tt.expectError {
-					if err == nil {
-						t.Errorf("Expected error but got none")
-					} else if tt.expectedErrMsg != "" && err.Error() != tt.expectedErrMsg {
+					tah.AssertError(t, err, "Expected error but got none")
+					if tt.expectedErrMsg != "" && err != nil && err.Error() != tt.expectedErrMsg {
 						t.Errorf("Expected error message '%s', got '%s'", tt.expectedErrMsg, err.Error())
 					}
 				} else {
-					if err != nil {
-						t.Errorf("Expected no error but got: %v", err)
-					}
+					tah.AssertNoError(t, err, "Expected no error but got one")
 				}
 			})
 
