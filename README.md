@@ -248,7 +248,7 @@ The module collects the following metrics from your Netatmo weather station:
 - `noise`: Noise level in dB (when available, typically indoor stations only)
 - `pressure`: Atmospheric pressure in mbar (when available, typically indoor stations only)
 
-**Note**: Not all metrics are available on all device types. The module only sends metrics for fields that contain data (non-zero values).
+**Note**: Not all metrics are available on all device types. The module only sends metrics for fields that contain data (non-zero values). Wind and rain data are not currently collected by this implementation.
 
 #### Authentication
 
@@ -260,6 +260,8 @@ The module uses OAuth2 Authorization Code flow with an **embedded web server** f
 climate,device=70:ee:50:xx:xx:xx,friendly=Indoor Station,vendor=netatmo temperature=22.5,humidity=65,co2=450,pressure=1013.25,noise=45 1634234234000000000
 climate,device=02:00:00:xx:xx:xx,friendly=Outdoor Module,vendor=netatmo temperature=18.2,humidity=72 1634234234000000000
 ```
+
+**Note**: The example shows the actual metrics collected by the current implementation. Wind and rain data are not included as they are not currently collected by this module.
 
 ### Demo Module
 
