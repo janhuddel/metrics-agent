@@ -10,82 +10,7 @@ import (
 	"time"
 )
 
-// mockStorage is a mock implementation of Storage for testing
-type mockStorage struct {
-	data map[string]interface{}
-}
-
-func newMockStorage() *mockStorage {
-	return &mockStorage{
-		data: make(map[string]interface{}),
-	}
-}
-
-func (m *mockStorage) Set(key string, value interface{}) error {
-	m.data[key] = value
-	return nil
-}
-
-func (m *mockStorage) Get(key string) interface{} {
-	return m.data[key]
-}
-
-func (m *mockStorage) GetString(key string) string {
-	if value, ok := m.data[key].(string); ok {
-		return value
-	}
-	return ""
-}
-
-func (m *mockStorage) GetInt(key string) int {
-	if value, ok := m.data[key].(int); ok {
-		return value
-	}
-	return 0
-}
-
-func (m *mockStorage) GetFloat64(key string) float64 {
-	if value, ok := m.data[key].(float64); ok {
-		return value
-	}
-	return 0.0
-}
-
-func (m *mockStorage) GetBool(key string) bool {
-	if value, ok := m.data[key].(bool); ok {
-		return value
-	}
-	return false
-}
-
-func (m *mockStorage) Delete(key string) error {
-	delete(m.data, key)
-	return nil
-}
-
-func (m *mockStorage) Exists(key string) bool {
-	_, exists := m.data[key]
-	return exists
-}
-
-func (m *mockStorage) Keys() []string {
-	keys := make([]string, 0, len(m.data))
-	for key := range m.data {
-		keys = append(keys, key)
-	}
-	return keys
-}
-
-func (m *mockStorage) Clear() error {
-	m.data = make(map[string]interface{})
-	return nil
-}
-
-func (m *mockStorage) GetFilePath() string {
-	return "/mock/path"
-}
-
-// createTestOAuth2Client creates an OAuth2Client with mock storage for testing
+// createTestOAuth2Client creates an OAuth2Client with real storage for testing
 func createTestOAuth2Client(config OAuth2Config) *OAuth2Client {
 	// Create a real storage instance for testing
 	storage, _ := NewStorage("test-oauth2")
@@ -630,6 +555,7 @@ func TestOAuth2Client_Authenticate_WithValidStoredToken(t *testing.T) {
 
 	if token == nil {
 		t.Errorf("Expected token but got nil")
+		return
 	}
 
 	if token.AccessToken != validToken.AccessToken {
@@ -673,6 +599,7 @@ func TestOAuth2Client_Authenticate_WithExpiredStoredToken(t *testing.T) {
 
 	if token == nil {
 		t.Errorf("Expected token but got nil")
+		return
 	}
 
 	// Should get the refreshed token
@@ -698,6 +625,368 @@ func TestOAuth2Client_Authenticate_WithInvalidStoredToken(t *testing.T) {
 	// Should get context-related error
 	if err == nil {
 		t.Errorf("Expected error due to context timeout")
+	}
+
+	if !strings.Contains(err.Error(), "context") {
+		t.Errorf("Expected context-related error, got: %v", err)
+	}
+}
+
+// TestOAuth2Client_ForceRefresh tests the ForceRefresh method
+func TestOAuth2Client_ForceRefresh(t *testing.T) {
+	tests := []struct {
+		name           string
+		setupStorage   func(*OAuth2Client)
+		expectedError  bool
+		expectedTokens bool
+	}{
+		{
+			name: "successful_force_refresh",
+			setupStorage: func(client *OAuth2Client) {
+				// Store a valid token with refresh token
+				token := &OAuth2Token{
+					AccessToken:  "old-access-token",
+					RefreshToken: "valid-refresh-token",
+					ExpiresAt:    time.Now().Add(time.Hour),
+				}
+				client.storeToken(token)
+			},
+			expectedError:  false,
+			expectedTokens: true,
+		},
+		{
+			name: "no_stored_token",
+			setupStorage: func(client *OAuth2Client) {
+				// No token stored - clear storage
+				client.storage.Clear()
+			},
+			expectedError:  true,
+			expectedTokens: false,
+		},
+		{
+			name: "no_refresh_token",
+			setupStorage: func(client *OAuth2Client) {
+				// Store token without refresh token
+				token := &OAuth2Token{
+					AccessToken:  "access-token",
+					RefreshToken: "",
+					ExpiresAt:    time.Now().Add(time.Hour),
+				}
+				client.storeToken(token)
+			},
+			expectedError:  true,
+			expectedTokens: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Create test server that returns successful refresh response
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/token" && r.Method == "POST" {
+					// Simulate successful token refresh
+					response := `{
+						"access_token": "new-access-token",
+						"refresh_token": "new-refresh-token",
+						"expires_in": 3600,
+						"scope": ["read", "write"]
+					}`
+					w.Header().Set("Content-Type", "application/json")
+					w.WriteHeader(http.StatusOK)
+					w.Write([]byte(response))
+					return
+				}
+				w.WriteHeader(http.StatusNotFound)
+			}))
+			defer server.Close()
+
+			// Create OAuth2Client
+			client := createTestOAuth2Client(OAuth2Config{
+				ClientID:     "test-client-id",
+				ClientSecret: "test-client-secret",
+				TokenURL:     server.URL + "/token",
+			})
+
+			// Setup storage
+			tt.setupStorage(client)
+
+			// Test ForceRefresh
+			ctx := context.Background()
+			token, err := client.ForceRefresh(ctx)
+
+			if tt.expectedError {
+				if err == nil {
+					t.Errorf("Expected error but got none")
+				}
+			} else {
+				if err != nil {
+					t.Errorf("Unexpected error: %v", err)
+				}
+				if token == nil {
+					t.Errorf("Expected token but got nil")
+					return
+				}
+				if token.AccessToken != "new-access-token" {
+					t.Errorf("Expected new access token, got: %s", token.AccessToken)
+				}
+			}
+		})
+	}
+}
+
+// TestOAuth2Client_AuthenticatedRequest tests the AuthenticatedRequest method
+func TestOAuth2Client_AuthenticatedRequest(t *testing.T) {
+	tests := []struct {
+		name            string
+		setupStorage    func(*OAuth2Client)
+		serverResponse  func(w http.ResponseWriter, r *http.Request)
+		expectedError   bool
+		expectedStatus  int
+		expectedRetries int
+	}{
+		{
+			name: "successful_request",
+			setupStorage: func(client *OAuth2Client) {
+				// Store a valid token
+				token := &OAuth2Token{
+					AccessToken:  "valid-access-token",
+					RefreshToken: "valid-refresh-token",
+					ExpiresAt:    time.Now().Add(time.Hour),
+				}
+				client.storeToken(token)
+			},
+			serverResponse: func(w http.ResponseWriter, r *http.Request) {
+				// Check authorization header
+				auth := r.Header.Get("Authorization")
+				if auth != "Bearer valid-access-token" {
+					t.Errorf("Expected Bearer valid-access-token, got: %s", auth)
+				}
+				w.WriteHeader(http.StatusOK)
+				w.Write([]byte(`{"status": "success"}`))
+			},
+			expectedError:   false,
+			expectedStatus:  http.StatusOK,
+			expectedRetries: 0,
+		},
+		{
+			name: "unauthorized_with_successful_refresh",
+			setupStorage: func(client *OAuth2Client) {
+				// Store a valid token
+				token := &OAuth2Token{
+					AccessToken:  "old-access-token",
+					RefreshToken: "valid-refresh-token",
+					ExpiresAt:    time.Now().Add(time.Hour),
+				}
+				client.storeToken(token)
+			},
+			serverResponse: func(w http.ResponseWriter, r *http.Request) {
+				auth := r.Header.Get("Authorization")
+				if strings.Contains(auth, "old-access-token") {
+					// First request with old token - return 401
+					w.WriteHeader(http.StatusUnauthorized)
+					w.Write([]byte(`{"error": "invalid_token"}`))
+					return
+				}
+				if strings.Contains(auth, "new-access-token") {
+					// Second request with new token - return success
+					w.WriteHeader(http.StatusOK)
+					w.Write([]byte(`{"status": "success"}`))
+					return
+				}
+				w.WriteHeader(http.StatusBadRequest)
+			},
+			expectedError:   false,
+			expectedStatus:  http.StatusOK,
+			expectedRetries: 1,
+		},
+		{
+			name: "unauthorized_with_failed_refresh",
+			setupStorage: func(client *OAuth2Client) {
+				// Store a token with invalid refresh token
+				token := &OAuth2Token{
+					AccessToken:  "old-access-token",
+					RefreshToken: "invalid-refresh-token",
+					ExpiresAt:    time.Now().Add(time.Hour),
+				}
+				client.storeToken(token)
+			},
+			serverResponse: func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/token" && r.Method == "POST" {
+					// Token refresh fails
+					w.WriteHeader(http.StatusBadRequest)
+					w.Write([]byte(`{"error": "invalid_grant"}`))
+					return
+				}
+				// API request returns 401
+				w.WriteHeader(http.StatusUnauthorized)
+				w.Write([]byte(`{"error": "invalid_token"}`))
+			},
+			expectedError:   true,
+			expectedStatus:  0,
+			expectedRetries: 2, // Max retries reached
+		},
+		{
+			name: "forbidden_with_successful_refresh",
+			setupStorage: func(client *OAuth2Client) {
+				// Store a valid token
+				token := &OAuth2Token{
+					AccessToken:  "old-access-token",
+					RefreshToken: "valid-refresh-token",
+					ExpiresAt:    time.Now().Add(time.Hour),
+				}
+				client.storeToken(token)
+			},
+			serverResponse: func(w http.ResponseWriter, r *http.Request) {
+				auth := r.Header.Get("Authorization")
+				if strings.Contains(auth, "old-access-token") {
+					// First request with old token - return 403
+					w.WriteHeader(http.StatusForbidden)
+					w.Write([]byte(`{"error": "insufficient_scope"}`))
+					return
+				}
+				if strings.Contains(auth, "new-access-token") {
+					// Second request with new token - return success
+					w.WriteHeader(http.StatusOK)
+					w.Write([]byte(`{"status": "success"}`))
+					return
+				}
+				w.WriteHeader(http.StatusBadRequest)
+			},
+			expectedError:   false,
+			expectedStatus:  http.StatusOK,
+			expectedRetries: 1,
+		},
+		{
+			name: "other_http_error",
+			setupStorage: func(client *OAuth2Client) {
+				// Store a valid token
+				token := &OAuth2Token{
+					AccessToken:  "valid-access-token",
+					RefreshToken: "valid-refresh-token",
+					ExpiresAt:    time.Now().Add(time.Hour),
+				}
+				client.storeToken(token)
+			},
+			serverResponse: func(w http.ResponseWriter, r *http.Request) {
+				// Return 500 error (not auth-related)
+				w.WriteHeader(http.StatusInternalServerError)
+				w.Write([]byte(`{"error": "server_error"}`))
+			},
+			expectedError:   false,
+			expectedStatus:  http.StatusInternalServerError,
+			expectedRetries: 0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Create test server
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/token" && r.Method == "POST" {
+					// Token refresh endpoint
+					response := `{
+						"access_token": "new-access-token",
+						"refresh_token": "new-refresh-token",
+						"expires_in": 3600,
+						"scope": ["read", "write"]
+					}`
+					w.Header().Set("Content-Type", "application/json")
+					w.WriteHeader(http.StatusOK)
+					w.Write([]byte(response))
+					return
+				}
+
+				// API endpoint
+				tt.serverResponse(w, r)
+			}))
+			defer server.Close()
+
+			// Create OAuth2Client
+			client := createTestOAuth2Client(OAuth2Config{
+				ClientID:     "test-client-id",
+				ClientSecret: "test-client-secret",
+				TokenURL:     server.URL + "/token",
+			})
+
+			// Setup storage
+			tt.setupStorage(client)
+
+			// Create HTTP request
+			req, err := http.NewRequest("GET", server.URL+"/api/test", nil)
+			if err != nil {
+				t.Fatalf("Failed to create request: %v", err)
+			}
+
+			// Test AuthenticatedRequest
+			ctx := context.Background()
+			httpClient := &http.Client{Timeout: 5 * time.Second}
+			resp, err := client.AuthenticatedRequest(ctx, httpClient, req)
+
+			if tt.expectedError {
+				if err == nil {
+					t.Errorf("Expected error but got none")
+				}
+				if resp != nil {
+					resp.Body.Close()
+				}
+			} else {
+				if err != nil {
+					t.Errorf("Unexpected error: %v", err)
+				}
+				if resp == nil {
+					t.Errorf("Expected response but got nil")
+				} else {
+					defer resp.Body.Close()
+					if resp.StatusCode != tt.expectedStatus {
+						t.Errorf("Expected status %d, got %d", tt.expectedStatus, resp.StatusCode)
+					}
+				}
+			}
+		})
+	}
+}
+
+// TestOAuth2Client_AuthenticatedRequest_ContextCancellation tests context cancellation
+func TestOAuth2Client_AuthenticatedRequest_ContextCancellation(t *testing.T) {
+	// Create test server that delays response
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(100 * time.Millisecond)
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"status": "success"}`))
+	}))
+	defer server.Close()
+
+	// Create OAuth2Client
+	client := createTestOAuth2Client(OAuth2Config{
+		ClientID:     "test-client-id",
+		ClientSecret: "test-client-secret",
+		TokenURL:     server.URL + "/token",
+	})
+
+	// Store a valid token
+	token := &OAuth2Token{
+		AccessToken:  "valid-access-token",
+		RefreshToken: "valid-refresh-token",
+		ExpiresAt:    time.Now().Add(time.Hour),
+	}
+	client.storeToken(token)
+
+	// Create HTTP request
+	req, err := http.NewRequest("GET", server.URL+"/api/test", nil)
+	if err != nil {
+		t.Fatalf("Failed to create request: %v", err)
+	}
+
+	// Test with cancelled context
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // Cancel immediately
+
+	httpClient := &http.Client{Timeout: 5 * time.Second}
+	_, err = client.AuthenticatedRequest(ctx, httpClient, req)
+
+	if err == nil {
+		t.Errorf("Expected error due to context cancellation")
+		return
 	}
 
 	if !strings.Contains(err.Error(), "context") {

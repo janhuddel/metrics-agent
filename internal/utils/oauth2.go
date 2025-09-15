@@ -63,7 +63,6 @@ func (c *OAuth2Client) Authenticate(ctx context.Context) (*OAuth2Token, error) {
 	if token, err := c.loadStoredToken(); err == nil && token != nil {
 		// Check if token is still valid
 		if time.Now().Before(token.ExpiresAt.Add(-5 * time.Minute)) {
-			log.Printf("Using stored valid token")
 			return token, nil
 		}
 
@@ -352,6 +351,34 @@ func (c *OAuth2Client) refreshToken(refreshToken string) (*OAuth2Token, error) {
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
 		log.Printf("OAuth2 token refresh failed - Status: %d, Response: %s", resp.StatusCode, string(body))
+
+		// Try to parse error response for better error messages
+		var errorResp struct {
+			Error            string `json:"error"`
+			ErrorDescription string `json:"error_description"`
+		}
+
+		if err := json.Unmarshal(body, &errorResp); err == nil {
+			switch errorResp.Error {
+			case "invalid_grant":
+				log.Printf("Refresh token is invalid, expired, or revoked")
+				log.Printf("Common causes:")
+				log.Printf("1. Refresh token expired (refresh tokens can expire)")
+				log.Printf("2. User revoked access to the application")
+				log.Printf("3. Application credentials changed")
+				log.Printf("4. Refresh token was already used (some providers invalidate after use)")
+				log.Printf("Full re-authentication will be required")
+			case "invalid_client":
+				log.Printf("Invalid client credentials - check your client_id and client_secret")
+			case "invalid_request":
+				log.Printf("Invalid refresh request - check refresh token format")
+			case "unsupported_grant_type":
+				log.Printf("Refresh token grant type not supported by this provider")
+			default:
+				log.Printf("OAuth2 error: %s - %s", errorResp.Error, errorResp.ErrorDescription)
+			}
+		}
+
 		return nil, fmt.Errorf("token refresh failed with status %d: %s", resp.StatusCode, string(body))
 	}
 
@@ -384,6 +411,92 @@ func (c *OAuth2Client) storeToken(token *OAuth2Token) error {
 	}
 
 	return c.storage.Set("oauth2_token", tokenData)
+}
+
+// AuthenticatedRequest makes an HTTP request with automatic token refresh and retry logic.
+// It handles authentication errors (401/403) by refreshing tokens and retrying the request.
+func (c *OAuth2Client) AuthenticatedRequest(ctx context.Context, client *http.Client, req *http.Request) (*http.Response, error) {
+	const maxRetries = 2
+
+	for attempt := 0; attempt <= maxRetries; attempt++ {
+		// Get current token (will refresh if needed)
+		token, err := c.Authenticate(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get valid token: %w", err)
+		}
+
+		// Set authorization header
+		req.Header.Set("Authorization", "Bearer "+token.AccessToken)
+
+		// Make the request with context
+		resp, err := client.Do(req.WithContext(ctx))
+		if err != nil {
+			return nil, err
+		}
+
+		// Check for authentication errors that might be resolved by token refresh
+		if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+			resp.Body.Close() // Close the response body before retrying
+
+			if attempt < maxRetries {
+				log.Printf("Authentication failed (status %d), attempting token refresh and retry (attempt %d/%d)",
+					resp.StatusCode, attempt+1, maxRetries)
+
+				// Force token refresh
+				_, err := c.ForceRefresh(ctx)
+				if err != nil {
+					log.Printf("Token refresh failed: %v", err)
+					// Continue to next attempt or return error
+					if attempt == maxRetries {
+						return nil, fmt.Errorf("API request failed with status %d after %d attempts (token refresh failed)",
+							resp.StatusCode, maxRetries+1)
+					}
+					continue
+				}
+
+				// Continue to next attempt with refreshed token
+				continue
+			} else {
+				// Max retries reached
+				return nil, fmt.Errorf("API request failed with status %d after %d attempts",
+					resp.StatusCode, maxRetries+1)
+			}
+		}
+
+		// Return the response (success or other error)
+		return resp, nil
+	}
+
+	// This should never be reached, but just in case
+	return nil, fmt.Errorf("unexpected error in authenticated request")
+}
+
+// ForceRefresh forces a token refresh regardless of expiration time.
+// This is useful when API calls fail with authentication errors.
+func (c *OAuth2Client) ForceRefresh(ctx context.Context) (*OAuth2Token, error) {
+	// Load stored token to get refresh token
+	token, err := c.loadStoredToken()
+	if err != nil || token == nil {
+		log.Printf("ForceRefresh: No stored token available for refresh")
+		return nil, fmt.Errorf("no stored token available for refresh: %w", err)
+	}
+
+	if token.RefreshToken == "" {
+		log.Printf("ForceRefresh: No refresh token available in stored token")
+		return nil, fmt.Errorf("no refresh token available")
+	}
+
+	log.Printf("ForceRefresh: Forcing token refresh due to API authentication failure")
+	log.Printf("ForceRefresh: Current token expires at: %s", token.ExpiresAt.Format(time.RFC3339))
+
+	refreshedToken, err := c.refreshToken(token.RefreshToken)
+	if err != nil {
+		log.Printf("ForceRefresh: Token refresh failed: %v", err)
+		return nil, fmt.Errorf("forced token refresh failed: %w", err)
+	}
+
+	log.Printf("ForceRefresh: Successfully refreshed token, new expiry: %s", refreshedToken.ExpiresAt.Format(time.RFC3339))
+	return refreshedToken, nil
 }
 
 // loadStoredToken loads an OAuth2 token from the storage.
@@ -422,7 +535,6 @@ func (c *OAuth2Client) loadStoredToken() (*OAuth2Token, error) {
 		ExpiresAt:    expiresAt,
 	}
 
-	log.Printf("Successfully loaded OAuth2 token from storage")
 	return token, nil
 }
 

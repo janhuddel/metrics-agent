@@ -194,12 +194,6 @@ func (nm *NetatmoModule) authenticate(ctx context.Context) error {
 			return fmt.Errorf("client_secret is required but not configured")
 		}
 
-		clientIDPreview := nm.config.ClientID
-		if len(clientIDPreview) > 8 {
-			clientIDPreview = clientIDPreview[:8]
-		}
-		log.Printf("Using client_id: %s...", clientIDPreview)
-
 		// Use centralized OAuth2 authentication
 		_, err := nm.oauth2.Authenticate(ctx)
 		if err != nil {
@@ -214,34 +208,29 @@ func (nm *NetatmoModule) authenticate(ctx context.Context) error {
 // collectData fetches data from Netatmo API and sends metrics
 func (nm *NetatmoModule) collectData(ctx context.Context) error {
 	return utils.WithPanicRecoveryAndReturnError("Netatmo data collection", "api", func() error {
-		// Get current token (will refresh if needed)
-		token, err := nm.oauth2.Authenticate(ctx)
-		if err != nil {
-			return fmt.Errorf("failed to get valid token: %w", err)
-		}
-
-		// Fetch station data
+		// Create request
 		req, err := http.NewRequest("GET", nm.baseURL+"/api/getstationsdata", nil)
 		if err != nil {
 			return err
 		}
 
-		req.Header.Set("Authorization", "Bearer "+token.AccessToken)
-
-		resp, err := nm.httpClient.Do(req)
+		// Use OAuth2Client's authenticated request method (handles retries automatically)
+		resp, err := nm.oauth2.AuthenticatedRequest(ctx, nm.httpClient, req)
 		if err != nil {
-			return err
+			return fmt.Errorf("API request failed: %w", err)
 		}
 		defer resp.Body.Close()
 
+		// Handle non-200 responses (after retries)
 		if resp.StatusCode != http.StatusOK {
 			body, _ := io.ReadAll(resp.Body)
 			return fmt.Errorf("API request failed with status %d: %s", resp.StatusCode, string(body))
 		}
 
+		// Parse response
 		var stationData StationData
 		if err := json.NewDecoder(resp.Body).Decode(&stationData); err != nil {
-			return err
+			return fmt.Errorf("failed to parse API response: %w", err)
 		}
 
 		if stationData.Status != "ok" {
