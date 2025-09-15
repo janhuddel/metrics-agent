@@ -241,35 +241,14 @@ Collects weather and climate data from Netatmo weather stations via the Netatmo 
 
 The module collects the following metrics from your Netatmo weather station:
 
-**Indoor Station** (`device_type: indoor`):
-- `temperature`: Indoor temperature in Celsius
-- `humidity`: Indoor humidity percentage
-- `co2`: CO2 level in ppm
-- `noise`: Noise level in dB
-- `pressure`: Atmospheric pressure in mbar
-- `absolute_pressure`: Absolute pressure in mbar
-- `min_temp`: Minimum temperature today
-- `max_temp`: Maximum temperature today
-- `temp_trend`: Temperature trend (up/down/stable)
-- `pressure_trend`: Pressure trend (up/down/stable)
+**All Devices/Modules**:
+- `temperature`: Temperature in Celsius (when available)
+- `humidity`: Humidity percentage (when available)
+- `co2`: CO2 level in ppm (when available, typically indoor stations only)
+- `noise`: Noise level in dB (when available, typically indoor stations only)
+- `pressure`: Atmospheric pressure in mbar (when available, typically indoor stations only)
 
-**Outdoor Module** (`device_type: outdoor`):
-- `temperature`: Outdoor temperature in Celsius
-- `humidity`: Outdoor humidity percentage
-- `min_temp`: Minimum temperature today
-- `max_temp`: Maximum temperature today
-- `temp_trend`: Temperature trend (up/down/stable)
-
-**Rain Module** (`device_type: rain`):
-- `rain`: Current rain level in mm
-- `rain_1h`: Rain in the last hour in mm
-- `rain_24h`: Rain in the last 24 hours in mm
-
-**Wind Module** (`device_type: wind`):
-- `wind_strength`: Wind strength in km/h
-- `wind_angle`: Wind direction in degrees
-- `gust_strength`: Gust strength in km/h
-- `gust_angle`: Gust direction in degrees
+**Note**: Not all metrics are available on all device types. The module only sends metrics for fields that contain data (non-zero values).
 
 #### Authentication
 
@@ -278,8 +257,8 @@ The module uses OAuth2 Authorization Code flow with an **embedded web server** f
 #### Example Output
 
 ```
-climate,device_id=70:ee:50:xx:xx:xx,device_name=Indoor Station,device_type=indoor,vendor=netatmo temperature=22.5,humidity=65,co2=450,pressure=1013.25 1634234234000000000
-climate,device_id=02:00:00:xx:xx:xx,device_name=Outdoor Module,device_type=outdoor,vendor=netatmo temperature=18.2,humidity=72 1634234234000000000
+climate,device=70:ee:50:xx:xx:xx,friendly=Indoor Station,vendor=netatmo temperature=22.5,humidity=65,co2=450,pressure=1013.25,noise=45 1634234234000000000
+climate,device=02:00:00:xx:xx:xx,friendly=Outdoor Module,vendor=netatmo temperature=18.2,humidity=72 1634234234000000000
 ```
 
 ### Demo Module

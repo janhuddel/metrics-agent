@@ -87,7 +87,7 @@ func TestSendDeviceMetrics(t *testing.T) {
 	select {
 	case metric := <-metricsCh:
 		if metric.Name != "climate" {
-			t.Errorf("Expected metric name to be 'netatmo_sensor', got '%s'", metric.Name)
+			t.Errorf("Expected metric name to be 'climate', got '%s'", metric.Name)
 		}
 
 		if metric.Tags["vendor"] != "netatmo" {

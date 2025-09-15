@@ -17,11 +17,10 @@ import (
 // Config represents the configuration for the Netatmo module
 type Config struct {
 	config.BaseConfig
-	ClientID          string `json:"client_id"`
-	ClientSecret      string `json:"client_secret"`
-	AuthorizationCode string `json:"authorization_code"` // Only used for initial setup if web auth fails
-	Timeout           string `json:"timeout"`
-	Interval          string `json:"interval"`
+	ClientID     string `json:"client_id"`
+	ClientSecret string `json:"client_secret"`
+	Timeout      string `json:"timeout"`
+	Interval     string `json:"interval"`
 }
 
 // NetatmoModule handles Netatmo API authentication and data collection
