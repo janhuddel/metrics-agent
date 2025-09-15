@@ -17,30 +17,66 @@ import (
 	"github.com/janhuddel/metrics-agent/internal/config"
 	"github.com/janhuddel/metrics-agent/internal/metricchannel"
 	"github.com/janhuddel/metrics-agent/internal/modules"
+	"github.com/janhuddel/metrics-agent/internal/utils"
 )
 
 var (
 	// flagVersion prints the version and exits
 	flagVersion = flag.Bool("version", false, "Print version and exit")
+	// flagConfig specifies the path to the configuration file
+	flagConfig = flag.String("c", "", "Path to configuration file")
 )
 
 // version can be overridden at build time with -ldflags
-const version = "0.1.0"
+var version = "dev"
 
 // main is the entry point of the metrics-agent application.
 // It initializes logging, parses command-line flags, and runs all modules
 // concurrently in a single process.
 func main() {
-	// Load global configuration first to set log level
-	globalConfig, err := config.LoadGlobalConfig()
-	if err != nil {
-		// If config loading fails, continue with default logging
-		log.Printf("Warning: Failed to load global configuration: %v", err)
-	}
-
 	// Configure logging to stderr since stdout is reserved for metrics (Line Protocol)
 	log.SetOutput(os.Stderr)
 	log.SetPrefix("[metrics-agent] ")
+
+	// Parse flags first to get config path
+	flag.Parse()
+
+	// Handle version flag
+	if *flagVersion {
+		fmt.Fprintf(os.Stderr, "metrics-agent %s (%s %s)\n", version, runtime.GOOS, runtime.GOARCH)
+		return
+	}
+
+	// Set global config path for modules to use
+	if *flagConfig != "" {
+		config.GlobalConfigPath = *flagConfig
+	}
+
+	// Load global configuration first to set log level
+	var globalConfig *config.GlobalConfig
+	var err error
+	var configPath string
+	if *flagConfig != "" {
+		configPath = *flagConfig
+		globalConfig, err = config.LoadGlobalConfigFromPath(*flagConfig)
+		if err != nil {
+			log.Fatalf("Failed to load configuration from specified file '%s': %v", *flagConfig, err)
+		}
+		log.Printf("Using configuration file: %s", configPath)
+	} else {
+		globalConfig, err = config.LoadGlobalConfig()
+		// Get the discovered config path for logging
+		configPath = config.GetGlobalConfigPath()
+		if configPath != "" {
+			log.Printf("Using configuration file: %s", configPath)
+		} else {
+			log.Printf("No configuration file found, using defaults")
+		}
+		if err != nil {
+			// If config loading fails, continue with default logging
+			log.Printf("Warning: Failed to load global configuration: %v", err)
+		}
+	}
 
 	// Set log level from configuration (defaults to info if not set)
 	if globalConfig != nil && globalConfig.LogLevel != "" {
@@ -48,14 +84,6 @@ func main() {
 	} else {
 		// Default to info level
 		config.SetLogLevel("info")
-	}
-
-	flag.Parse()
-
-	// Handle version flag
-	if *flagVersion {
-		fmt.Fprintf(os.Stderr, "metrics-agent %s (%s %s)\n", version, runtime.GOOS, runtime.GOARCH)
-		return
 	}
 
 	// Run all modules in a single process
@@ -75,17 +103,13 @@ func runAllModules() {
 
 	// Signal handler goroutine
 	go func() {
-		defer func() {
-			if r := recover(); r != nil {
-				log.Printf("Signal handler panic recovered: %v", r)
+		utils.WithPanicRecoveryAndContinue("Signal handler", "main", func() {
+			for {
+				sig := <-sigCh
+				log.Printf("Received signal: %s", sig)
+				signalType <- sig
 			}
-		}()
-
-		for {
-			sig := <-sigCh
-			log.Printf("Received signal: %s", sig)
-			signalType <- sig
-		}
+		})
 	}()
 
 	for {
@@ -115,17 +139,13 @@ func runAllModules() {
 			wg.Add(1)
 			go func(name string) {
 				defer wg.Done()
-				defer func() {
-					if r := recover(); r != nil {
-						log.Printf("[%s] panic recovered: %v", name, r)
+				utils.WithPanicRecoveryAndContinue("Module execution", name, func() {
+					log.Printf("[%s] starting module", name)
+					if err := modules.Global.Run(ctx, name, metricCh.Get()); err != nil {
+						log.Printf("[%s] module error: %v", name, err)
 					}
-				}()
-
-				log.Printf("[%s] starting module", name)
-				if err := modules.Global.Run(ctx, name, metricCh.Get()); err != nil {
-					log.Printf("[%s] module error: %v", name, err)
-				}
-				log.Printf("[%s] module stopped", name)
+					log.Printf("[%s] module stopped", name)
+				})
 			}(moduleName)
 		}
 

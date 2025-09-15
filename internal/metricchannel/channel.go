@@ -7,6 +7,7 @@ import (
 	"log"
 
 	"github.com/janhuddel/metrics-agent/internal/metrics"
+	"github.com/janhuddel/metrics-agent/internal/utils"
 )
 
 // Channel manages a buffered channel for metrics and handles serialization.
@@ -37,30 +38,26 @@ func (c *Channel) Get() chan metrics.Metric {
 // and writes them to stdout in Line Protocol format.
 func (c *Channel) StartSerializer() {
 	go func() {
-		defer func() {
-			if r := recover(); r != nil {
-				log.Printf("[worker] metric serializer panic recovered: %v", r)
-			}
-		}()
-
-		for {
-			select {
-			case m, ok := <-c.metricCh:
-				if !ok {
-					// Channel closed, exit
+		utils.WithPanicRecoveryAndContinue("Metric serializer", "worker", func() {
+			for {
+				select {
+				case m, ok := <-c.metricCh:
+					if !ok {
+						// Channel closed, exit
+						return
+					}
+					line, err := m.ToLineProtocolSafe()
+					if err != nil {
+						log.Printf("[worker] serialization error: %v", err)
+						continue
+					}
+					fmt.Println(line) // Write directly to stdout
+				case <-c.ctx.Done():
+					// Context cancelled, exit
 					return
 				}
-				line, err := m.ToLineProtocolSafe()
-				if err != nil {
-					log.Printf("[worker] serialization error: %v", err)
-					continue
-				}
-				fmt.Println(line) // Write directly to stdout
-			case <-c.ctx.Done():
-				// Context cancelled, exit
-				return
 			}
-		}
+		})
 	}()
 }
 

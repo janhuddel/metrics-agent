@@ -9,6 +9,7 @@ import (
 
 	mqtt "github.com/eclipse/paho.mqtt.golang"
 	"github.com/janhuddel/metrics-agent/internal/metrics"
+	"github.com/janhuddel/metrics-agent/internal/utils"
 )
 
 // TasmotaModule handles MQTT connections and device discovery.
@@ -40,103 +41,85 @@ func Run(ctx context.Context, ch chan<- metrics.Metric) error {
 
 // run executes the main module loop.
 func (tm *TasmotaModule) run(ctx context.Context) error {
-	defer func() {
-		if r := recover(); r != nil {
-			log.Printf("Tasmota module panic recovered: %v", r)
+	return utils.WithPanicRecoveryAndReturnError("Tasmota module", "main", func() error {
+		// Connect to MQTT broker
+		if err := tm.connect(); err != nil {
+			return fmt.Errorf("failed to connect to MQTT broker: %w", err)
 		}
-	}()
+		defer tm.disconnect()
 
-	// Connect to MQTT broker
-	if err := tm.connect(); err != nil {
-		return fmt.Errorf("failed to connect to MQTT broker: %w", err)
-	}
-	defer tm.disconnect()
+		// Subscribe to discovery topic
+		discoveryTopic := "tasmota/discovery/+/config"
+		if token := tm.client.Subscribe(discoveryTopic, 1, tm.handleDiscoveryMessage); token.Wait() && token.Error() != nil {
+			return fmt.Errorf("failed to subscribe to discovery topic: %w", token.Error())
+		}
+		log.Printf("Subscribed to discovery topic: %s", discoveryTopic)
 
-	// Subscribe to discovery topic
-	discoveryTopic := "tasmota/discovery/+/config"
-	if token := tm.client.Subscribe(discoveryTopic, 1, tm.handleDiscoveryMessage); token.Wait() && token.Error() != nil {
-		return fmt.Errorf("failed to subscribe to discovery topic: %w", token.Error())
-	}
-	log.Printf("Subscribed to discovery topic: %s", discoveryTopic)
-
-	// Wait for context cancellation
-	<-ctx.Done()
-	return ctx.Err()
+		// Wait for context cancellation
+		<-ctx.Done()
+		return ctx.Err()
+	})
 }
 
 // connect establishes connection to the MQTT broker.
 func (tm *TasmotaModule) connect() error {
-	defer func() {
-		if r := recover(); r != nil {
-			log.Printf("MQTT connect panic recovered: %v", r)
+	return utils.WithPanicRecoveryAndReturnError("MQTT connect", "broker", func() error {
+		// Set default client ID if not provided
+		clientID := tm.config.ClientID
+		if clientID == "" {
+			hostname, _ := os.Hostname()
+			clientID = hostname + "-tasmota"
 		}
-	}()
 
-	// Set default client ID if not provided
-	clientID := tm.config.ClientID
-	if clientID == "" {
-		hostname, _ := os.Hostname()
-		clientID = hostname + "-tasmota"
-	}
+		opts := mqtt.NewClientOptions()
+		opts.AddBroker(tm.config.Broker)
+		opts.SetClientID(clientID)
+		opts.SetUsername(tm.config.Username)
+		opts.SetPassword(tm.config.Password)
+		opts.SetConnectTimeout(tm.config.Timeout)
+		opts.SetAutoReconnect(true)
+		opts.SetResumeSubs(true)    // Resume subscriptions after reconnection
+		opts.SetCleanSession(false) // Use persistent session to maintain subscriptions
+		opts.SetKeepAlive(tm.config.KeepAlive)
+		opts.SetPingTimeout(tm.config.PingTimeout)
+		opts.SetMaxReconnectInterval(5 * time.Minute)  // Limit max reconnect interval
+		opts.SetConnectRetryInterval(10 * time.Second) // Retry connection every 10 seconds
+		opts.SetOrderMatters(false)                    // Allow out-of-order message processing
+		opts.SetProtocolVersion(4)                     // Use MQTT 3.1.1 protocol
 
-	opts := mqtt.NewClientOptions()
-	opts.AddBroker(tm.config.Broker)
-	opts.SetClientID(clientID)
-	opts.SetUsername(tm.config.Username)
-	opts.SetPassword(tm.config.Password)
-	opts.SetConnectTimeout(tm.config.Timeout)
-	opts.SetAutoReconnect(true)
-	opts.SetResumeSubs(true)    // Resume subscriptions after reconnection
-	opts.SetCleanSession(false) // Use persistent session to maintain subscriptions
-	opts.SetKeepAlive(tm.config.KeepAlive)
-	opts.SetPingTimeout(tm.config.PingTimeout)
-	opts.SetMaxReconnectInterval(5 * time.Minute)  // Limit max reconnect interval
-	opts.SetConnectRetryInterval(10 * time.Second) // Retry connection every 10 seconds
-	opts.SetOrderMatters(false)                    // Allow out-of-order message processing
-	opts.SetProtocolVersion(4)                     // Use MQTT 3.1.1 protocol
+		// Set connection lost handler with panic recovery
+		opts.SetConnectionLostHandler(func(client mqtt.Client, err error) {
+			utils.WithPanicRecoveryAndContinue("MQTT connection lost handler", "broker", func() {
+				log.Printf("MQTT connection lost: %v", err)
+				// Note: AutoReconnect is enabled, so the client will automatically attempt to reconnect
+				// Subscriptions will be restored due to SetResumeSubs(true) and SetCleanSession(false)
+			})
+		})
 
-	// Set connection lost handler with panic recovery
-	opts.SetConnectionLostHandler(func(client mqtt.Client, err error) {
-		defer func() {
-			if r := recover(); r != nil {
-				log.Printf("MQTT connection lost handler panic recovered: %v", r)
-			}
-		}()
-		log.Printf("MQTT connection lost: %v", err)
-		// Note: AutoReconnect is enabled, so the client will automatically attempt to reconnect
-		// Subscriptions will be restored due to SetResumeSubs(true) and SetCleanSession(false)
+		// Set reconnect handler with panic recovery
+		opts.SetOnConnectHandler(func(client mqtt.Client) {
+			utils.WithPanicRecoveryAndContinue("MQTT reconnect handler", "broker", func() {
+				log.Printf("Connected to MQTT broker: %s", tm.config.Broker)
+				// Note: Subscriptions will be automatically restored due to SetResumeSubs(true)
+			})
+		})
+
+		tm.client = mqtt.NewClient(opts)
+		if token := tm.client.Connect(); token.Wait() && token.Error() != nil {
+			return token.Error()
+		}
+
+		return nil
 	})
-
-	// Set reconnect handler with panic recovery
-	opts.SetOnConnectHandler(func(client mqtt.Client) {
-		defer func() {
-			if r := recover(); r != nil {
-				log.Printf("MQTT reconnect handler panic recovered: %v", r)
-			}
-		}()
-		log.Printf("Connected to MQTT broker: %s", tm.config.Broker)
-		// Note: Subscriptions will be automatically restored due to SetResumeSubs(true)
-	})
-
-	tm.client = mqtt.NewClient(opts)
-	if token := tm.client.Connect(); token.Wait() && token.Error() != nil {
-		return token.Error()
-	}
-
-	return nil
 }
 
 // disconnect closes the MQTT connection.
 func (tm *TasmotaModule) disconnect() {
-	defer func() {
-		if r := recover(); r != nil {
-			log.Printf("MQTT disconnect panic recovered: %v", r)
+	utils.WithPanicRecoveryAndContinue("MQTT disconnect", "broker", func() {
+		if tm.client != nil && tm.client.IsConnected() {
+			tm.client.Disconnect(250)
 		}
-	}()
-
-	if tm.client != nil && tm.client.IsConnected() {
-		tm.client.Disconnect(250)
-	}
+	})
 }
 
 // Public methods for testing

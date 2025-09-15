@@ -7,29 +7,26 @@ import (
 	"sync"
 
 	mqtt "github.com/eclipse/paho.mqtt.golang"
+	"github.com/janhuddel/metrics-agent/internal/utils"
 )
 
 // handleDiscoveryMessage processes incoming device discovery messages.
 func (tm *TasmotaModule) handleDiscoveryMessage(client mqtt.Client, msg mqtt.Message) {
-	defer func() {
-		if r := recover(); r != nil {
-			log.Printf("Discovery message handler panic recovered: %v", r)
+	utils.WithPanicRecoveryAndContinue("Discovery message handler", "unknown", func() {
+		var device DeviceInfo
+		if err := json.Unmarshal(msg.Payload(), &device); err != nil {
+			log.Printf("Failed to parse device discovery message: %v", err)
+			return
 		}
-	}()
 
-	var device DeviceInfo
-	if err := json.Unmarshal(msg.Payload(), &device); err != nil {
-		log.Printf("Failed to parse device discovery message: %v", err)
-		return
-	}
+		// Store device info
+		tm.deviceMgr.StoreDevice(&device)
 
-	// Store device info
-	tm.deviceMgr.StoreDevice(&device)
+		log.Printf("Discovered Tasmota device: %s (%s) at %s", device.DN, device.T, device.IP)
 
-	log.Printf("Discovered Tasmota device: %s (%s) at %s", device.DN, device.T, device.IP)
-
-	// Subscribe to sensor data for this device (non-blocking)
-	tm.subscribeToSensorData(device.T)
+		// Subscribe to sensor data for this device (non-blocking)
+		tm.subscribeToSensorData(device.T)
+	})
 }
 
 // subscribeToSensorData subscribes to sensor data for a specific device.
@@ -56,29 +53,25 @@ func (tm *TasmotaModule) createSensorHandler(deviceTopic string) mqtt.MessageHan
 
 // handleSensorMessage processes incoming sensor data messages.
 func (tm *TasmotaModule) handleSensorMessage(deviceTopic string, msg mqtt.Message) {
-	defer func() {
-		if r := recover(); r != nil {
-			log.Printf("Sensor message handler panic recovered for device %s: %v", deviceTopic, r)
+	utils.WithPanicRecoveryAndContinue("Sensor message handler", deviceTopic, func() {
+		// Get device info
+		device, exists := tm.deviceMgr.GetDevice(deviceTopic)
+
+		if !exists {
+			log.Printf("Received sensor data for unknown device: %s", deviceTopic)
+			return
 		}
-	}()
 
-	// Get device info
-	device, exists := tm.deviceMgr.GetDevice(deviceTopic)
+		// Parse sensor data (this is a generic JSON object)
+		var sensorData map[string]interface{}
+		if err := json.Unmarshal(msg.Payload(), &sensorData); err != nil {
+			log.Printf("Failed to parse sensor data for device %s: %v", deviceTopic, err)
+			return
+		}
 
-	if !exists {
-		log.Printf("Received sensor data for unknown device: %s", deviceTopic)
-		return
-	}
-
-	// Parse sensor data (this is a generic JSON object)
-	var sensorData map[string]interface{}
-	if err := json.Unmarshal(msg.Payload(), &sensorData); err != nil {
-		log.Printf("Failed to parse sensor data for device %s: %v", deviceTopic, err)
-		return
-	}
-
-	// Process sensor data and create metrics
-	tm.processor.ProcessSensorData(device, sensorData)
+		// Process sensor data and create metrics
+		tm.processor.ProcessSensorData(device, sensorData)
+	})
 }
 
 // DeviceManager handles device storage and retrieval.

@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/janhuddel/metrics-agent/internal/metrics"
+	"github.com/janhuddel/metrics-agent/internal/utils"
 )
 
 // ModuleFunc represents a function that runs a metric collection module.
@@ -67,12 +68,7 @@ func (r *Registry) Run(ctx context.Context, name string, ch chan<- metrics.Metri
 	}
 
 	// Execute module with panic recovery
-	defer func() {
-		if r := recover(); r != nil {
-			// Panic is handled by the caller (main process)
-			panic(r)
-		}
-	}()
-
-	return fn(ctx, ch)
+	return utils.WithPanicRecoveryAndReturnError("Module execution", name, func() error {
+		return fn(ctx, ch)
+	})
 }

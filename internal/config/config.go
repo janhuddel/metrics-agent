@@ -15,6 +15,10 @@ import (
 	"time"
 )
 
+// GlobalConfigPath holds the path to the global configuration file
+// This is set when the application starts and used by modules
+var GlobalConfigPath string
+
 // BaseConfig represents the base configuration that all modules can embed.
 type BaseConfig struct {
 	// Module-specific overrides (device topic/ID -> friendly name)
@@ -57,6 +61,14 @@ type Loader struct {
 func NewLoader(moduleName string) *Loader {
 	return &Loader{
 		moduleName: moduleName,
+	}
+}
+
+// NewLoaderWithPath creates a new configuration loader for a specific module with a custom config path.
+func NewLoaderWithPath(moduleName string, configPath string) *Loader {
+	return &Loader{
+		moduleName: moduleName,
+		configPath: configPath,
 	}
 }
 
@@ -211,7 +223,12 @@ func (l *Loader) getConfigPath() string {
 		return l.configPath
 	}
 
-	// 2. Try common locations
+	// 2. Use global config path if set
+	if GlobalConfigPath != "" {
+		return GlobalConfigPath
+	}
+
+	// 3. Try common locations
 	possiblePaths := []string{
 		"metrics-agent.json",
 		filepath.Join("config", "metrics-agent.json"),
@@ -264,21 +281,30 @@ func GetFriendlyName(deviceID string, deviceFriendlyName string, deviceName stri
 
 // LoadGlobalConfig loads the global configuration and applies global settings like log level.
 func LoadGlobalConfig() (*GlobalConfig, error) {
-	configPath := getGlobalConfigPath()
+	configPath := GetGlobalConfigPath()
 	if configPath == "" {
 		// No config file found, return default config
 		return &GlobalConfig{}, nil
+	}
+	return LoadGlobalConfigFromPath(configPath)
+}
+
+// LoadGlobalConfigFromPath loads the global configuration from a specific path.
+func LoadGlobalConfigFromPath(configPath string) (*GlobalConfig, error) {
+	// Check if config file exists
+	if _, err := os.Stat(configPath); os.IsNotExist(err) {
+		return nil, fmt.Errorf("configuration file not found: %s", configPath)
 	}
 
 	// Read and parse the config file
 	data, err := os.ReadFile(configPath)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to read configuration file %s: %w", configPath, err)
 	}
 
 	var globalConfig GlobalConfig
 	if err := json.Unmarshal(data, &globalConfig); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to parse configuration file %s: %w", configPath, err)
 	}
 
 	// Apply global settings
@@ -306,8 +332,8 @@ func SetLogLevel(level string) {
 	}
 }
 
-// getGlobalConfigPath determines the global configuration file path to use.
-func getGlobalConfigPath() string {
+// GetGlobalConfigPath determines the global configuration file path to use.
+func GetGlobalConfigPath() string {
 	// Try common locations
 	possiblePaths := []string{
 		"metrics-agent.json",
