@@ -295,8 +295,10 @@ func TestEnergySensorPowerArrayHandling(t *testing.T) {
 			if metric.Fields["power"] != expectedValues[i] {
 				t.Errorf("Expected power value %v at index %d, got %v", expectedValues[i], i, metric.Fields["power"])
 			}
-			if metric.Tags["power_index"] != fmt.Sprintf("%d", i) {
-				t.Errorf("Expected power_index tag '%d', got '%s'", i, metric.Tags["power_index"])
+			// Verify device tag includes the index suffix
+			expectedDeviceTag := fmt.Sprintf("tasmota_6886BC.%d", i)
+			if metric.Tags["device"] != expectedDeviceTag {
+				t.Errorf("Expected device tag '%s', got '%s'", expectedDeviceTag, metric.Tags["device"])
 			}
 		}
 	})
