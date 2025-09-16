@@ -72,6 +72,7 @@ Edit the configuration file to match your environment:
   "module_restart_limit": 3,
   "modules": {
     "tasmota": {
+      "enabled": true,
       "friendly_name_overrides": {
         "tasmota_6886BC.0": "Filteranlage",
         "tasmota_6886BC.1": "Wärmepumpe"
@@ -105,8 +106,26 @@ Edit the configuration file to match your environment:
 
 Each module can have:
 
+- `enabled`: **Required** - Set to `true` to enable the module, `false` or omit to disable (default: `false`)
 - `friendly_name_overrides`: Map device IDs to human-readable names
 - `custom`: Module-specific configuration options
+
+**Important**: Modules are **disabled by default** for security. You must explicitly set `"enabled": true` for each module you want to run.
+
+### Module Activation
+
+The metrics-agent uses an **opt-in security model** where modules are disabled by default:
+
+- **Default behavior**: All modules are disabled (`enabled: false`)
+- **Explicit activation**: Only modules with `"enabled": true` will start
+- **Security benefit**: Prevents accidental execution of modules
+- **Clear logging**: The agent logs which modules are enabled/disabled on startup
+
+**Example startup log:**
+```
+[metrics-agent] Disabled modules: [netatmo]
+[metrics-agent] Starting 1 enabled modules: [tasmota]
+```
 
 ## Usage
 
@@ -215,6 +234,7 @@ Collects weather and climate data from Netatmo weather stations via the Netatmo 
    {
      "modules": {
        "netatmo": {
+         "enabled": true,
          "friendly_name_overrides": {
            "70:ee:50:xx:xx:xx": "Indoor Station",
            "02:00:00:xx:xx:xx": "Outdoor Module"
@@ -235,6 +255,7 @@ Collects weather and climate data from Netatmo weather stations via the Netatmo 
    {
      "modules": {
        "netatmo": {
+         "enabled": true,
          "friendly_name_overrides": {
            "70:ee:50:xx:xx:xx": "Indoor Station",
            "02:00:00:xx:xx:xx": "Outdoor Module"
@@ -502,6 +523,8 @@ journalctl -u telegraf | grep "module failed.*times, exiting program"
 4. **No Metrics**: Check if metrics-agent is running
 5. **Frequent Restarts**: Check module configuration
 6. **High CPU**: Check for infinite restart loops (shouldn't happen with limit=3)
+7. **No modules enabled**: Check that modules have `"enabled": true` in configuration
+8. **"No modules enabled, exiting"**: All modules are disabled - enable at least one module
 
 ### Debug Commands
 
@@ -532,6 +555,8 @@ The agent logs to stderr with the prefix `[metrics-agent]`. Log levels can be co
 3. **Test configurations**: Validate before deployment
 4. **Resource limits**: Set appropriate memory/CPU limits in systemd
 5. **Backup configs**: Keep configuration files in version control
+6. **Enable modules explicitly**: Always set `"enabled": true` for modules you want to run
+7. **Security first**: Only enable modules you actually need - disabled by default is safer
 
 ## Performance Benefits
 

@@ -3,6 +3,7 @@
     "module_restart_limit": 1,
     "modules": {
         "tasmota": {
+            "enabled": true,
             "friendly_name_overrides": {
                 "tasmota_6886BC.0": "Filteranlage",
                 "tasmota_6886BC.1": "Wärmepumpe"
@@ -15,6 +16,7 @@
             }
         },
         "netatmo": {
+            "enabled": false,
             "friendly_name_overrides": {
                 "70:ee:50:xx:xx:xx": "Indoor Station",
                 "02:00:00:xx:xx:xx": "Outdoor Module"

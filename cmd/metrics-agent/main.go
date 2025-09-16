@@ -124,15 +124,45 @@ func runAllModules(globalConfig *config.GlobalConfig) {
 		metricCh.StartSerializer()
 
 		// Get list of all registered modules
-		moduleNames := modules.Global.List()
-		if len(moduleNames) == 0 {
+		allModuleNames := modules.Global.List()
+		if len(allModuleNames) == 0 {
 			log.Printf("No modules registered, exiting")
 			metricCh.Close()
 			cancel()
 			return
 		}
 
-		log.Printf("Starting %d modules: %v", len(moduleNames), moduleNames)
+		// Filter modules based on enabled configuration
+		var moduleNames []string
+		var disabledModules []string
+
+		for _, moduleName := range allModuleNames {
+			enabled := false
+			if globalConfig != nil && globalConfig.Modules != nil {
+				if moduleConfig, exists := globalConfig.Modules[moduleName]; exists {
+					enabled = moduleConfig.Enabled
+				}
+			}
+
+			if enabled {
+				moduleNames = append(moduleNames, moduleName)
+			} else {
+				disabledModules = append(disabledModules, moduleName)
+			}
+		}
+
+		if len(disabledModules) > 0 {
+			log.Printf("Disabled modules: %v", disabledModules)
+		}
+
+		if len(moduleNames) == 0 {
+			log.Printf("No modules enabled, exiting")
+			metricCh.Close()
+			cancel()
+			return
+		}
+
+		log.Printf("Starting %d enabled modules: %v", len(moduleNames), moduleNames)
 
 		// Log restart limit configuration
 		maxRestarts := 3 // Default value

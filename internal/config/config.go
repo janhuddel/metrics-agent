@@ -38,6 +38,9 @@ type ModuleConfig struct {
 	// Common settings that apply to all modules
 	LogLevel string `json:"log_level,omitempty"`
 
+	// Module activation setting - defaults to false (disabled)
+	Enabled bool `json:"enabled,omitempty"`
+
 	// Base configuration that modules can embed
 	BaseConfig `json:",inline"`
 }
