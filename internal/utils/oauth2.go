@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"html/template"
 	"io"
-	"log"
 	"net"
 	"net/http"
 	"net/url"
@@ -46,11 +45,13 @@ type OAuth2Client struct {
 
 // NewOAuth2Client creates a new OAuth2 client.
 func NewOAuth2Client(config OAuth2Config, moduleName string) (*OAuth2Client, error) {
+	Debugf("Creating OAuth2 client for module: %s", moduleName)
 	storage, err := NewStorage(moduleName)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create storage: %w", err)
 	}
 
+	Debugf("OAuth2 client created successfully for module: %s", moduleName)
 	return &OAuth2Client{
 		config:  config,
 		storage: storage,
@@ -65,24 +66,27 @@ func (c *OAuth2Client) GetConfig() OAuth2Config {
 // Authenticate performs OAuth2 authentication using Authorization Code flow.
 // It will try to use stored tokens first, then perform web authorization if needed.
 func (c *OAuth2Client) Authenticate(ctx context.Context) (*OAuth2Token, error) {
+	Debugf("Starting OAuth2 authentication process")
 	// Try to load existing tokens
 	if token, err := c.loadStoredToken(); err == nil && token != nil {
+		Debugf("Found stored token, checking expiry")
 		// Check if token is still valid
 		if time.Now().Before(token.ExpiresAt.Add(-5 * time.Minute)) {
+			Debugf("Stored token is still valid, using cached token")
 			return token, nil
 		}
 
 		// Try to refresh the token
-		log.Printf("Stored token expired, attempting to refresh")
+		Debugf("Stored token expired, attempting to refresh")
 		if refreshedToken, err := c.refreshToken(token.RefreshToken); err == nil {
 			return refreshedToken, nil
 		} else {
-			log.Printf("Token refresh failed: %v", err)
+			Warnf("Token refresh failed: %v", err)
 		}
 	}
 
 	// Need to perform initial authorization
-	log.Printf("Starting OAuth2 authorization flow...")
+	Infof("Starting OAuth2 authorization flow...")
 	authCode, redirectURI, err := c.performWebAuthorization(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("web authorization failed: %w", err)
@@ -96,7 +100,7 @@ func (c *OAuth2Client) Authenticate(ctx context.Context) (*OAuth2Token, error) {
 
 	// Store the new token
 	if err := c.storeToken(token); err != nil {
-		log.Printf("Warning: Failed to store token: %v", err)
+		Warnf("Failed to store token: %v", err)
 	}
 
 	return token, nil
@@ -222,13 +226,13 @@ func (c *OAuth2Client) performWebAuthorization(ctx context.Context) (string, str
 	}()
 
 	// Open browser automatically
-	log.Printf("Opening browser for authorization...")
-	log.Printf("If the browser doesn't open automatically, please visit: http://%s:%d", hostname, port)
+	Infof("Opening browser for authorization...")
+	Infof("If the browser doesn't open automatically, please visit: http://%s:%d", hostname, port)
 
 	// Try to open browser
 	if err := openBrowser(fmt.Sprintf("http://%s:%d", hostname, port)); err != nil {
-		log.Printf("Could not open browser automatically: %v", err)
-		log.Printf("Please manually open: http://%s:%d", hostname, port)
+		Warnf("Could not open browser automatically: %v", err)
+		Infof("Please manually open: http://%s:%d", hostname, port)
 	}
 
 	// Wait for authorization code or error
@@ -239,7 +243,7 @@ func (c *OAuth2Client) performWebAuthorization(ctx context.Context) (string, str
 		defer cancel()
 		server.Shutdown(shutdownCtx)
 
-		log.Printf("Authorization successful!")
+		Infof("Authorization successful!")
 		return authCode, redirectURI, nil
 
 	case err := <-errorChan:
@@ -294,7 +298,7 @@ func (c *OAuth2Client) exchangeAuthorizationCode(authCode, redirectURI string) (
 	body, _ := io.ReadAll(resp.Body)
 
 	if resp.StatusCode != http.StatusOK {
-		log.Printf("OAuth2 token exchange failed - Status: %d, Response: %s", resp.StatusCode, string(body))
+		Errorf("OAuth2 token exchange failed - Status: %d, Response: %s", resp.StatusCode, string(body))
 
 		// Try to parse error response for better error messages
 		var errorResp struct {
@@ -305,19 +309,19 @@ func (c *OAuth2Client) exchangeAuthorizationCode(authCode, redirectURI string) (
 		if err := json.Unmarshal(body, &errorResp); err == nil {
 			switch errorResp.Error {
 			case "invalid_grant":
-				log.Printf("Authorization code is invalid, expired, or already used")
-				log.Printf("Common causes:")
-				log.Printf("1. Authorization code expired (they expire within 10 minutes)")
-				log.Printf("2. Authorization code already used (can only be used once)")
-				log.Printf("3. Wrong redirect URI in authorization vs token exchange")
-				log.Printf("4. Incorrect client_id or client_secret")
-				log.Printf("Please get a fresh authorization code and try again")
+				Errorf("Authorization code is invalid, expired, or already used")
+				Errorf("Common causes:")
+				Errorf("1. Authorization code expired (they expire within 10 minutes)")
+				Errorf("2. Authorization code already used (can only be used once)")
+				Errorf("3. Wrong redirect URI in authorization vs token exchange")
+				Errorf("4. Incorrect client_id or client_secret")
+				Errorf("Please get a fresh authorization code and try again")
 			case "invalid_client":
-				log.Printf("Invalid client credentials - check your client_id and client_secret")
+				Errorf("Invalid client credentials - check your client_id and client_secret")
 			case "invalid_request":
-				log.Printf("Invalid request - check your authorization code and redirect URI")
+				Errorf("Invalid request - check your authorization code and redirect URI")
 			default:
-				log.Printf("Error: %s - %s", errorResp.Error, errorResp.ErrorDescription)
+				Errorf("Error: %s - %s", errorResp.Error, errorResp.ErrorDescription)
 			}
 		}
 
@@ -331,9 +335,9 @@ func (c *OAuth2Client) exchangeAuthorizationCode(authCode, redirectURI string) (
 
 	token.ExpiresAt = time.Now().Add(time.Duration(token.ExpiresIn) * time.Second)
 
-	log.Printf("Successfully obtained OAuth2 tokens")
-	log.Printf("Access token expires at: %s", token.ExpiresAt.Format(time.RFC3339))
-	log.Printf("Scope: %v", token.Scope)
+	Infof("Successfully obtained OAuth2 tokens")
+	Debugf("Access token expires at: %s", token.ExpiresAt.Format(time.RFC3339))
+	Debugf("Scope: %v", token.Scope)
 
 	return &token, nil
 }
@@ -362,7 +366,7 @@ func (c *OAuth2Client) refreshToken(refreshToken string) (*OAuth2Token, error) {
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		log.Printf("OAuth2 token refresh failed - Status: %d, Response: %s", resp.StatusCode, string(body))
+		Errorf("OAuth2 token refresh failed - Status: %d, Response: %s", resp.StatusCode, string(body))
 
 		// Try to parse error response for better error messages
 		var errorResp struct {
@@ -373,21 +377,21 @@ func (c *OAuth2Client) refreshToken(refreshToken string) (*OAuth2Token, error) {
 		if err := json.Unmarshal(body, &errorResp); err == nil {
 			switch errorResp.Error {
 			case "invalid_grant":
-				log.Printf("Refresh token is invalid, expired, or revoked")
-				log.Printf("Common causes:")
-				log.Printf("1. Refresh token expired (refresh tokens can expire)")
-				log.Printf("2. User revoked access to the application")
-				log.Printf("3. Application credentials changed")
-				log.Printf("4. Refresh token was already used (some providers invalidate after use)")
-				log.Printf("Full re-authentication will be required")
+				Errorf("Refresh token is invalid, expired, or revoked")
+				Errorf("Common causes:")
+				Errorf("1. Refresh token expired (refresh tokens can expire)")
+				Errorf("2. User revoked access to the application")
+				Errorf("3. Application credentials changed")
+				Errorf("4. Refresh token was already used (some providers invalidate after use)")
+				Errorf("Full re-authentication will be required")
 			case "invalid_client":
-				log.Printf("Invalid client credentials - check your client_id and client_secret")
+				Errorf("Invalid client credentials - check your client_id and client_secret")
 			case "invalid_request":
-				log.Printf("Invalid refresh request - check refresh token format")
+				Errorf("Invalid refresh request - check refresh token format")
 			case "unsupported_grant_type":
-				log.Printf("Refresh token grant type not supported by this provider")
+				Errorf("Refresh token grant type not supported by this provider")
 			default:
-				log.Printf("OAuth2 error: %s - %s", errorResp.Error, errorResp.ErrorDescription)
+				Errorf("OAuth2 error: %s - %s", errorResp.Error, errorResp.ErrorDescription)
 			}
 		}
 
@@ -401,12 +405,12 @@ func (c *OAuth2Client) refreshToken(refreshToken string) (*OAuth2Token, error) {
 
 	token.ExpiresAt = time.Now().Add(time.Duration(token.ExpiresIn) * time.Second)
 
-	log.Printf("Successfully refreshed OAuth2 token")
-	log.Printf("New token expires at: %s", token.ExpiresAt.Format(time.RFC3339))
+	Infof("Successfully refreshed OAuth2 token")
+	Debugf("New token expires at: %s", token.ExpiresAt.Format(time.RFC3339))
 
 	// Store the refreshed token
 	if err := c.storeToken(&token); err != nil {
-		log.Printf("Warning: Failed to store refreshed token: %v", err)
+		Warnf("Failed to store refreshed token: %v", err)
 	}
 
 	return &token, nil
@@ -451,13 +455,13 @@ func (c *OAuth2Client) AuthenticatedRequest(ctx context.Context, client *http.Cl
 			resp.Body.Close() // Close the response body before retrying
 
 			if attempt < maxRetries {
-				log.Printf("Authentication failed (status %d), attempting token refresh and retry (attempt %d/%d)",
+				Warnf("Authentication failed (status %d), attempting token refresh and retry (attempt %d/%d)",
 					resp.StatusCode, attempt+1, maxRetries)
 
 				// Force token refresh
 				_, err := c.ForceRefresh(ctx)
 				if err != nil {
-					log.Printf("Token refresh failed: %v", err)
+					Errorf("Token refresh failed: %v", err)
 					// Continue to next attempt or return error
 					if attempt == maxRetries {
 						return nil, fmt.Errorf("API request failed with status %d after %d attempts (token refresh failed)",
@@ -489,25 +493,25 @@ func (c *OAuth2Client) ForceRefresh(ctx context.Context) (*OAuth2Token, error) {
 	// Load stored token to get refresh token
 	token, err := c.loadStoredToken()
 	if err != nil || token == nil {
-		log.Printf("ForceRefresh: No stored token available for refresh")
+		Warnf("ForceRefresh: No stored token available for refresh")
 		return nil, fmt.Errorf("no stored token available for refresh: %w", err)
 	}
 
 	if token.RefreshToken == "" {
-		log.Printf("ForceRefresh: No refresh token available in stored token")
+		Warnf("ForceRefresh: No refresh token available in stored token")
 		return nil, fmt.Errorf("no refresh token available")
 	}
 
-	log.Printf("ForceRefresh: Forcing token refresh due to API authentication failure")
-	log.Printf("ForceRefresh: Current token expires at: %s", token.ExpiresAt.Format(time.RFC3339))
+	Infof("ForceRefresh: Forcing token refresh due to API authentication failure")
+	Debugf("ForceRefresh: Current token expires at: %s", token.ExpiresAt.Format(time.RFC3339))
 
 	refreshedToken, err := c.refreshToken(token.RefreshToken)
 	if err != nil {
-		log.Printf("ForceRefresh: Token refresh failed: %v", err)
+		Errorf("ForceRefresh: Token refresh failed: %v", err)
 		return nil, fmt.Errorf("forced token refresh failed: %w", err)
 	}
 
-	log.Printf("ForceRefresh: Successfully refreshed token, new expiry: %s", refreshedToken.ExpiresAt.Format(time.RFC3339))
+	Infof("ForceRefresh: Successfully refreshed token, new expiry: %s", refreshedToken.ExpiresAt.Format(time.RFC3339))
 	return refreshedToken, nil
 }
 
@@ -525,7 +529,7 @@ func (c *OAuth2Client) loadStoredToken() (*OAuth2Token, error) {
 
 	// Verify client_id matches
 	if clientID, ok := data["client_id"].(string); !ok || clientID != c.config.ClientID {
-		log.Printf("Stored token client_id mismatch, ignoring stored token")
+		Warnf("Stored token client_id mismatch, ignoring stored token")
 		return nil, nil
 	}
 

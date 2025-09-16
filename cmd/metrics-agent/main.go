@@ -7,7 +7,6 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	"log"
 	"os"
 	"os/signal"
 	"runtime"
@@ -35,10 +34,6 @@ var version = "dev"
 // It initializes logging, parses command-line flags, and runs all modules
 // concurrently in a single process.
 func main() {
-	// Configure logging to stderr since stdout is reserved for metrics (Line Protocol)
-	log.SetOutput(os.Stderr)
-	log.SetPrefix("[metrics-agent] ")
-
 	// Parse flags first to get config path
 	flag.Parse()
 
@@ -61,30 +56,32 @@ func main() {
 		configPath = *flagConfig
 		globalConfig, err = config.LoadGlobalConfigFromPath(*flagConfig)
 		if err != nil {
-			log.Fatalf("Failed to load configuration from specified file '%s': %v", *flagConfig, err)
+			utils.Fatalf("Failed to load configuration from specified file '%s': %v", *flagConfig, err)
 		}
-		log.Printf("Using configuration file: %s", configPath)
+		utils.Infof("Using configuration file: %s", configPath)
 	} else {
 		globalConfig, err = config.LoadGlobalConfig()
 		// Get the discovered config path for logging
 		configPath = config.GetGlobalConfigPath()
 		if configPath != "" {
-			log.Printf("Using configuration file: %s", configPath)
+			utils.Infof("Using configuration file: %s", configPath)
 		} else {
-			log.Printf("No configuration file found, using defaults")
+			utils.Infof("No configuration file found, using defaults")
 		}
 		if err != nil {
 			// If config loading fails, continue with default logging
-			log.Printf("Warning: Failed to load global configuration: %v", err)
+			utils.Warnf("Failed to load global configuration: %v", err)
 		}
 	}
 
 	// Set log level from configuration (defaults to info if not set)
 	if globalConfig != nil && globalConfig.LogLevel != "" {
 		config.SetLogLevel(globalConfig.LogLevel)
+		utils.Debugf("Log level configured from config file: %s", globalConfig.LogLevel)
 	} else {
 		// Default to info level
 		config.SetLogLevel("info")
+		utils.Debugf("Using default log level: info")
 	}
 
 	// Run all modules in a single process
@@ -107,7 +104,7 @@ func runAllModules(globalConfig *config.GlobalConfig) {
 		utils.WithPanicRecoveryAndContinue("Signal handler", "main", func() {
 			for {
 				sig := <-sigCh
-				log.Printf("Received signal: %s", sig)
+				utils.Infof("Received signal: %s", sig)
 				signalType <- sig
 			}
 		})
@@ -119,14 +116,17 @@ func runAllModules(globalConfig *config.GlobalConfig) {
 
 		// Create metric channel for all modules to share
 		metricCh := metricchannel.New(100)
+		utils.Debugf("Created metric channel with buffer size: 100")
 
 		// Start metric serializer
 		metricCh.StartSerializer()
+		utils.Debugf("Started metric serializer")
 
 		// Get list of all registered modules
 		allModuleNames := modules.Global.List()
+		utils.Debugf("Found %d registered modules: %v", len(allModuleNames), allModuleNames)
 		if len(allModuleNames) == 0 {
-			log.Printf("No modules registered, exiting")
+			utils.Infof("No modules registered, exiting")
 			metricCh.Close()
 			cancel()
 			return
@@ -141,7 +141,12 @@ func runAllModules(globalConfig *config.GlobalConfig) {
 			if globalConfig != nil && globalConfig.Modules != nil {
 				if moduleConfig, exists := globalConfig.Modules[moduleName]; exists {
 					enabled = moduleConfig.Enabled
+					utils.Debugf("Module %s: enabled=%v (from config)", moduleName, enabled)
+				} else {
+					utils.Debugf("Module %s: enabled=false (no config found)", moduleName)
 				}
+			} else {
+				utils.Debugf("Module %s: enabled=false (no global config)", moduleName)
 			}
 
 			if enabled {
@@ -152,17 +157,17 @@ func runAllModules(globalConfig *config.GlobalConfig) {
 		}
 
 		if len(disabledModules) > 0 {
-			log.Printf("Disabled modules: %v", disabledModules)
+			utils.Infof("Disabled modules: %v", disabledModules)
 		}
 
 		if len(moduleNames) == 0 {
-			log.Printf("No modules enabled, exiting")
+			utils.Infof("No modules enabled, exiting")
 			metricCh.Close()
 			cancel()
 			return
 		}
 
-		log.Printf("Starting %d enabled modules: %v", len(moduleNames), moduleNames)
+		utils.Infof("Starting %d enabled modules: %v", len(moduleNames), moduleNames)
 
 		// Log restart limit configuration
 		maxRestarts := 3 // Default value
@@ -176,10 +181,10 @@ func runAllModules(globalConfig *config.GlobalConfig) {
 		}
 
 		if maxRestarts == 0 {
-			log.Printf("Module restart limit: unlimited")
-			log.Printf("WARNING: Unlimited restarts (limit=0) is NOT recommended for telegraf/systemd deployments!")
+			utils.Infof("Module restart limit: unlimited")
+			utils.Warnf("Unlimited restarts (limit=0) is NOT recommended for telegraf/systemd deployments!")
 		} else {
-			log.Printf("Module restart limit: %d", maxRestarts)
+			utils.Infof("Module restart limit: %d", maxRestarts)
 		}
 
 		// Run all modules concurrently with individual restart capability
@@ -195,19 +200,19 @@ func runAllModules(globalConfig *config.GlobalConfig) {
 				for {
 					select {
 					case <-ctx.Done():
-						log.Printf("[%s] module stopped due to context cancellation", name)
+						utils.Infof("[%s] module stopped due to context cancellation", name)
 						return
 					default:
 						utils.WithPanicRecoveryAndContinue("Module execution", name, func() {
 							if maxRestarts == 0 {
-								log.Printf("[%s] starting module (attempt %d/unlimited)", name, restartCount+1)
+								utils.Infof("[%s] starting module (attempt %d/unlimited)", name, restartCount+1)
 							} else {
-								log.Printf("[%s] starting module (attempt %d/%d)", name, restartCount+1, maxRestarts+1)
+								utils.Infof("[%s] starting module (attempt %d/%d)", name, restartCount+1, maxRestarts+1)
 							}
 							if err := modules.Global.Run(ctx, name, metricCh.Get()); err != nil {
-								log.Printf("[%s] module error: %v", name, err)
+								utils.Errorf("[%s] module error: %v", name, err)
 							}
-							log.Printf("[%s] module stopped", name)
+							utils.Infof("[%s] module stopped", name)
 						})
 
 						// Check if we should restart or exit
@@ -217,15 +222,15 @@ func runAllModules(globalConfig *config.GlobalConfig) {
 						default:
 							restartCount++
 							if maxRestarts > 0 && restartCount >= maxRestarts {
-								log.Printf("[%s] module failed %d times, exiting program", name, restartCount)
+								utils.Errorf("[%s] module failed %d times, exiting program", name, restartCount)
 								// Signal other modules to stop and exit
 								cancel()
 								return
 							}
 							if maxRestarts == 0 {
-								log.Printf("[%s] restarting module after completion/panic (restart %d/unlimited)", name, restartCount)
+								utils.Infof("[%s] restarting module after completion/panic (restart %d/unlimited)", name, restartCount)
 							} else {
-								log.Printf("[%s] restarting module after completion/panic (restart %d/%d)", name, restartCount, maxRestarts)
+								utils.Infof("[%s] restarting module after completion/panic (restart %d/%d)", name, restartCount, maxRestarts)
 							}
 							time.Sleep(1 * time.Second) // Brief delay before restart
 						}
@@ -243,7 +248,7 @@ func runAllModules(globalConfig *config.GlobalConfig) {
 
 		select {
 		case sig := <-signalType:
-			log.Printf("Received %s, stopping modules...", sig)
+			utils.Infof("Received %s, stopping modules...", sig)
 			cancel()  // Stop all modules
 			wg.Wait() // Wait for modules to stop
 
@@ -252,15 +257,15 @@ func runAllModules(globalConfig *config.GlobalConfig) {
 
 			switch sig {
 			case syscall.SIGHUP:
-				log.Printf("Restarting all modules...")
+				utils.Infof("Restarting all modules...")
 				continue // Restart the loop
 			case syscall.SIGTERM, syscall.SIGINT:
-				log.Printf("Shutting down...")
+				utils.Infof("Shutting down...")
 				return // Exit the process
 			}
 		case <-done:
 			// All modules completed normally
-			log.Printf("All modules completed normally")
+			utils.Infof("All modules completed normally")
 			metricCh.Close()
 			cancel()
 			return

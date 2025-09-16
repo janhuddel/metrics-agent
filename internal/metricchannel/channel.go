@@ -4,7 +4,6 @@ package metricchannel
 import (
 	"context"
 	"fmt"
-	"log"
 
 	"github.com/janhuddel/metrics-agent/internal/metrics"
 	"github.com/janhuddel/metrics-agent/internal/utils"
@@ -48,7 +47,7 @@ func (c *Channel) StartSerializer() {
 					}
 					line, err := m.ToLineProtocolSafe()
 					if err != nil {
-						log.Printf("[worker] serialization error: %v", err)
+						utils.Errorf("[worker] serialization error: %v", err)
 						continue
 					}
 					fmt.Println(line) // Write directly to stdout

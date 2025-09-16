@@ -3,7 +3,6 @@ package tasmota
 import (
 	"encoding/json"
 	"fmt"
-	"log"
 	"sync"
 
 	mqtt "github.com/eclipse/paho.mqtt.golang"
@@ -15,14 +14,14 @@ func (tm *TasmotaModule) handleDiscoveryMessage(client mqtt.Client, msg mqtt.Mes
 	utils.WithPanicRecoveryAndContinue("Discovery message handler", "unknown", func() {
 		var device DeviceInfo
 		if err := json.Unmarshal(msg.Payload(), &device); err != nil {
-			log.Printf("Failed to parse device discovery message: %v", err)
+			utils.Errorf("Failed to parse device discovery message: %v", err)
 			return
 		}
 
 		// Store device info
 		tm.deviceMgr.StoreDevice(&device)
 
-		log.Printf("Discovered Tasmota device: %s (%s) at %s", device.DN, device.T, device.IP)
+		utils.Infof("Discovered Tasmota device: %s (%s) at %s", device.DN, device.T, device.IP)
 
 		// Subscribe to sensor data for this device (non-blocking)
 		tm.subscribeToSensorData(device.T)
@@ -37,7 +36,7 @@ func (tm *TasmotaModule) subscribeToSensorData(deviceTopic string) {
 	tm.SubscriptionMux.Lock()
 	if tm.SubscribedTopics[sensorTopic] {
 		tm.SubscriptionMux.Unlock()
-		log.Printf("Already subscribed to sensor topic: %s", sensorTopic)
+		utils.Debugf("Already subscribed to sensor topic: %s", sensorTopic)
 		return
 	}
 	tm.SubscribedTopics[sensorTopic] = true
@@ -52,9 +51,9 @@ func (tm *TasmotaModule) subscribeToSensorData(deviceTopic string) {
 			tm.SubscriptionMux.Lock()
 			delete(tm.SubscribedTopics, sensorTopic)
 			tm.SubscriptionMux.Unlock()
-			log.Printf("Failed to subscribe to sensor topic %s: %v", sensorTopic, token.Error())
+			utils.Errorf("Failed to subscribe to sensor topic %s: %v", sensorTopic, token.Error())
 		} else {
-			log.Printf("Subscribed to sensor topic: %s", sensorTopic)
+			utils.Debugf("Subscribed to sensor topic: %s", sensorTopic)
 		}
 	}()
 }
@@ -73,14 +72,14 @@ func (tm *TasmotaModule) handleSensorMessage(deviceTopic string, msg mqtt.Messag
 		device, exists := tm.deviceMgr.GetDevice(deviceTopic)
 
 		if !exists {
-			log.Printf("Received sensor data for unknown device: %s", deviceTopic)
+			utils.Warnf("Received sensor data for unknown device: %s", deviceTopic)
 			return
 		}
 
 		// Parse sensor data (this is a generic JSON object)
 		var sensorData map[string]interface{}
 		if err := json.Unmarshal(msg.Payload(), &sensorData); err != nil {
-			log.Printf("Failed to parse sensor data for device %s: %v", deviceTopic, err)
+			utils.Errorf("Failed to parse sensor data for device %s: %v", deviceTopic, err)
 			return
 		}
 

@@ -3,7 +3,6 @@ package utils
 
 import (
 	"fmt"
-	"log"
 )
 
 // WithPanicRecoveryAndContinue executes a function with panic recovery and logging.
@@ -13,7 +12,7 @@ import (
 func WithPanicRecoveryAndContinue(operation string, deviceID string, fn func()) {
 	defer func() {
 		if r := recover(); r != nil {
-			log.Printf("%s panic recovered for device %s: %v", operation, deviceID, r)
+			Errorf("%s panic recovered for device %s: %v", operation, deviceID, r)
 		}
 	}()
 	fn()
@@ -26,7 +25,7 @@ func WithPanicRecoveryAndContinue(operation string, deviceID string, fn func()) 
 func WithPanicRecoveryAndReturnError(operation string, deviceID string, fn func() error) (err error) {
 	defer func() {
 		if r := recover(); r != nil {
-			log.Printf("%s panic recovered for device %s: %v", operation, deviceID, r)
+			Errorf("%s panic recovered for device %s: %v", operation, deviceID, r)
 			err = fmt.Errorf("panic in %s: %v", operation, r)
 		}
 	}()

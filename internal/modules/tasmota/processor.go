@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -148,13 +147,13 @@ func (sp *SensorProcessor) ProcessSensorData(device *DeviceInfo, sensorData map[
 				if energyData, ok := data.(map[string]any); ok {
 					sp.processEnergySensor(device, sensorType, energyData, timestamp)
 				} else {
-					log.Printf("Warning: invalid data format for %s sensor type on device %s", sensorTypeEnergy, device.T)
+					utils.Warnf("Invalid data format for %s sensor type on device %s", sensorTypeEnergy, device.T)
 				}
 			case sensorTypeMT175:
 				if mt175Data, ok := data.(map[string]any); ok {
 					sp.processMT175Sensor(device, sensorType, mt175Data, timestamp)
 				} else {
-					log.Printf("Warning: invalid data format for %s sensor type on device %s", sensorTypeMT175, device.T)
+					utils.Warnf("Invalid data format for %s sensor type on device %s", sensorTypeMT175, device.T)
 				}
 			}
 		}
@@ -167,7 +166,7 @@ func (sp *SensorProcessor) processEnergySensor(device *DeviceInfo, sensorType st
 		// Handle Power field - it can be either a single float64 or an array of float64 values
 		powerValue, exists := data[fieldPower]
 		if !exists {
-			log.Printf("Warning: %s field not found in %s sensor data for device %s", fieldPower, sensorTypeEnergy, device.T)
+			utils.Warnf("%s field not found in %s sensor data for device %s", fieldPower, sensorTypeEnergy, device.T)
 			return
 		}
 
@@ -178,7 +177,7 @@ func (sp *SensorProcessor) processEnergySensor(device *DeviceInfo, sensorType st
 		case []any:
 			sp.processMultiChannelEnergy(device, data, powerData, timestamp)
 		default:
-			log.Printf("Warning: unexpected %s field type for device %s: %T", fieldPower, device.T, powerData)
+			utils.Warnf("Unexpected %s field type for device %s: %T", fieldPower, device.T, powerData)
 		}
 	})
 }
@@ -190,7 +189,7 @@ func (sp *SensorProcessor) processMT175Sensor(device *DeviceInfo, sensorType str
 
 		powerValue, exists := mt175Data[fieldPower]
 		if !exists {
-			log.Printf("Warning: %s field not found in %s sensor data for device %s", fieldPower, sensorTypeMT175, device.T)
+			utils.Warnf("%s field not found in %s sensor data for device %s", fieldPower, sensorTypeMT175, device.T)
 			return
 		}
 
@@ -241,7 +240,7 @@ func (sp *SensorProcessor) processMultiChannelEnergy(device *DeviceInfo, data ma
 	// Fetch energy totals via HTTP for multi-channel devices
 	energyTotals, err := sp.fetchEnergyTotals(device)
 	if err != nil {
-		log.Printf("Warning: failed to fetch energy totals for device %s: %v", device.T, err)
+		utils.Warnf("Failed to fetch energy totals for device %s: %v", device.T, err)
 	}
 
 	// Send one metric for each element
@@ -249,7 +248,7 @@ func (sp *SensorProcessor) processMultiChannelEnergy(device *DeviceInfo, data ma
 		if powerFloat, ok := powerItem.(float64); ok {
 			sp.processMultiChannelElement(device, data, powerFloat, i, energyTotals, timestamp)
 		} else {
-			log.Printf("Warning: invalid power value type at index %d for device %s: %T", i, device.T, powerItem)
+			utils.Warnf("Invalid power value type at index %d for device %s: %T", i, device.T, powerItem)
 		}
 	}
 }
@@ -293,7 +292,7 @@ func (sp *SensorProcessor) sendPowerMetric(device *DeviceInfo, tags map[string]s
 
 	// Validate metric before sending to prevent serialization errors
 	if err := metric.Validate(); err != nil {
-		log.Printf("Warning: invalid metric for device %s: %v", device.T, err)
+		utils.Warnf("Invalid metric for device %s: %v", device.T, err)
 		return
 	}
 
@@ -302,7 +301,7 @@ func (sp *SensorProcessor) sendPowerMetric(device *DeviceInfo, tags map[string]s
 	case sp.metricsCh <- metric:
 		// Metric sent successfully
 	case <-time.After(metricSendTimeout):
-		log.Printf("Warning: metric channel full, dropping metric for device %s", device.T)
+		utils.Warnf("Metric channel full, dropping metric for device %s", device.T)
 	}
 }
 

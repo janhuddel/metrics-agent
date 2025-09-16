@@ -3,7 +3,6 @@ package tasmota
 import (
 	"context"
 	"fmt"
-	"log"
 	"os"
 	"sync"
 	"time"
@@ -26,6 +25,11 @@ type TasmotaModule struct {
 
 // NewTasmotaModule creates a new Tasmota module instance.
 func NewTasmotaModule(config Config) *TasmotaModule {
+	utils.Debugf("Creating new Tasmota module instance")
+	utils.Debugf("Loaded Tasmota config: Broker=%s, KeepAlive=%v, PingTimeout=%v, Timeout=%v",
+		config.Broker, config.KeepAlive, config.PingTimeout, config.Timeout)
+
+	utils.Debugf("Tasmota module created successfully")
 	return &TasmotaModule{
 		config:           config,
 		deviceMgr:        NewDeviceManager(),
@@ -57,7 +61,7 @@ func (tm *TasmotaModule) run(ctx context.Context) error {
 		if token := tm.client.Subscribe(discoveryTopic, 1, tm.handleDiscoveryMessage); token.Wait() && token.Error() != nil {
 			return fmt.Errorf("failed to subscribe to discovery topic: %w", token.Error())
 		}
-		log.Printf("Subscribed to discovery topic: %s", discoveryTopic)
+		utils.Debugf("Subscribed to discovery topic: %s", discoveryTopic)
 
 		// Wait for context cancellation
 		<-ctx.Done()
@@ -94,7 +98,7 @@ func (tm *TasmotaModule) connect() error {
 		// Set connection lost handler with panic recovery
 		opts.SetConnectionLostHandler(func(client mqtt.Client, err error) {
 			utils.WithPanicRecoveryAndContinue("MQTT connection lost handler", "broker", func() {
-				log.Printf("MQTT connection lost: %v", err)
+				utils.Errorf("MQTT connection lost: %v", err)
 				// Note: AutoReconnect is enabled, so the client will automatically attempt to reconnect
 				// Subscriptions will be restored due to SetResumeSubs(true) and SetCleanSession(false)
 			})
@@ -103,7 +107,7 @@ func (tm *TasmotaModule) connect() error {
 		// Set reconnect handler with panic recovery
 		opts.SetOnConnectHandler(func(client mqtt.Client) {
 			utils.WithPanicRecoveryAndContinue("MQTT reconnect handler", "broker", func() {
-				log.Printf("Connected to MQTT broker: %s", tm.config.Broker)
+				utils.Infof("Connected to MQTT broker: %s", tm.config.Broker)
 				// Note: Subscriptions will be automatically restored due to SetResumeSubs(true)
 			})
 		})

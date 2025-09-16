@@ -4,10 +4,11 @@ package metrics
 
 import (
 	"fmt"
-	"log"
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/janhuddel/metrics-agent/internal/utils"
 )
 
 // Metric represents a single metric measurement.
@@ -96,7 +97,7 @@ func ValidateAndConvertFields(fields map[string]interface{}) map[string]interfac
 		if convertedValue, err := convertToSupportedType(value); err == nil {
 			converted[key] = convertedValue
 		} else {
-			log.Printf("Warning: skipping unsupported field type %T for key '%s': %v", value, key, err)
+			utils.Warnf("Skipping unsupported field type %T for key '%s': %v", value, key, err)
 		}
 	}
 

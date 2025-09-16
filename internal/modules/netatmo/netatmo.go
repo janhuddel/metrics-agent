@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"time"
 
@@ -101,12 +100,14 @@ type Dashboard struct {
 
 // NewNetatmoModule creates a new Netatmo module instance
 func NewNetatmoModule(config Config) (*NetatmoModule, error) {
+	utils.Debugf("Creating new Netatmo module instance")
 	timeout := 30 * time.Second
 	if config.Timeout != "" {
 		if parsed, err := time.ParseDuration(config.Timeout); err == nil {
 			timeout = parsed
 		}
 	}
+	utils.Debugf("Netatmo module timeout set to: %v", timeout)
 
 	// Create OAuth2 client
 	oauth2Config := utils.OAuth2Config{
@@ -124,6 +125,7 @@ func NewNetatmoModule(config Config) (*NetatmoModule, error) {
 		return nil, fmt.Errorf("failed to create OAuth2 client: %w", err)
 	}
 
+	utils.Debugf("Netatmo module created successfully")
 	return &NetatmoModule{
 		config: config,
 		httpClient: &http.Client{
@@ -167,7 +169,7 @@ func (nm *NetatmoModule) run(ctx context.Context) error {
 
 		// Collect initial data
 		if err := nm.collectData(ctx); err != nil {
-			log.Printf("Warning: failed to collect initial data: %v", err)
+			utils.Warnf("Failed to collect initial data: %v", err)
 		}
 
 		// Main collection loop
@@ -177,7 +179,7 @@ func (nm *NetatmoModule) run(ctx context.Context) error {
 				return ctx.Err()
 			case <-ticker.C:
 				if err := nm.collectData(ctx); err != nil {
-					log.Printf("Warning: failed to collect data: %v", err)
+					utils.Warnf("Failed to collect data: %v", err)
 				}
 			}
 		}
@@ -201,7 +203,7 @@ func (nm *NetatmoModule) authenticate(ctx context.Context) error {
 			return fmt.Errorf("OAuth2 authentication failed: %w", err)
 		}
 
-		log.Printf("Successfully authenticated with Netatmo API")
+		utils.Infof("Successfully authenticated with Netatmo API")
 		return nil
 	})
 }
@@ -313,7 +315,7 @@ func (nm *NetatmoModule) sendDeviceMetrics(deviceID string, friendlyName string,
 		select {
 		case nm.metricsCh <- metric:
 		default:
-			log.Printf("Warning: metrics channel is full, dropping metric for device %s", deviceID)
+			utils.Warnf("Metrics channel is full, dropping metric for device %s", deviceID)
 		}
 	}
 }
@@ -332,7 +334,7 @@ func LoadConfig() Config {
 
 	loadedConfig, err := loader.LoadConfig(&defaultConfig)
 	if err != nil {
-		log.Printf("Warning: failed to load Netatmo configuration: %v", err)
+		utils.Warnf("Failed to load Netatmo configuration: %v", err)
 		return defaultConfig
 	}
 

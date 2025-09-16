@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -359,15 +358,18 @@ func NewTestLogCapture() *TestLogCapture {
 func (tlc *TestLogCapture) CaptureLogOutput(fn func()) string {
 	// Create a pipe to capture log output
 	r, w, _ := os.Pipe()
-	originalOutput := log.Writer()
-	log.SetOutput(w)
+
+	// Store the original logger and create a new one for testing
+	originalLogger := GetGlobalLogger()
+	testLogger := NewLogger(DEBUG, w)
+	SetGlobalLogger(testLogger)
 
 	// Run the function
 	fn()
 
-	// Close the writer and restore original output
+	// Close the writer and restore original logger
 	w.Close()
-	log.SetOutput(originalOutput)
+	SetGlobalLogger(originalLogger)
 
 	// Read the captured output
 	buf := make([]byte, 1024)

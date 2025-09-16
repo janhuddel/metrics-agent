@@ -6,13 +6,14 @@ package config
 import (
 	"encoding/json"
 	"fmt"
-	"log"
 	"os"
 	"path/filepath"
 	"reflect"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/janhuddel/metrics-agent/internal/utils"
 )
 
 // GlobalConfigPath holds the path to the global configuration file
@@ -313,29 +314,13 @@ func LoadGlobalConfigFromPath(configPath string) (*GlobalConfig, error) {
 		return nil, fmt.Errorf("failed to parse configuration file %s: %w", configPath, err)
 	}
 
-	// Apply global settings
-	if globalConfig.LogLevel != "" {
-		SetLogLevel(globalConfig.LogLevel)
-	}
-
 	return &globalConfig, nil
 }
 
 // SetLogLevel sets the global log level based on the configuration.
 func SetLogLevel(level string) {
-	switch strings.ToLower(level) {
-	case "debug":
-		log.SetFlags(log.LstdFlags | log.Lmicroseconds | log.Lshortfile)
-	case "info":
-		log.SetFlags(log.LstdFlags | log.Lmicroseconds)
-	case "warn", "warning":
-		log.SetFlags(log.LstdFlags | log.Lmicroseconds)
-	case "error":
-		log.SetFlags(log.LstdFlags | log.Lmicroseconds)
-	default:
-		// Default to info level
-		log.SetFlags(log.LstdFlags | log.Lmicroseconds)
-	}
+	utils.SetGlobalLogLevelFromString(level)
+	utils.Debugf("Log level set to: %s", level)
 }
 
 // GetGlobalConfigPath determines the global configuration file path to use.
