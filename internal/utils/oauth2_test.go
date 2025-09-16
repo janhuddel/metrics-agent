@@ -66,6 +66,7 @@ func TestOAuth2Client_StoreToken(t *testing.T) {
 	tah := NewTestAssertionHelper()
 
 	client := createTestOAuth2Client(tdg.CreateTestOAuth2ConfigWithClientID("test-client-id"))
+	defer os.Remove(client.storage.GetFilePath())
 	token := tdg.CreateValidTestToken()
 
 	err := client.storeToken(token)
@@ -288,6 +289,7 @@ func TestOAuth2Client_ExchangeAuthorizationCode(t *testing.T) {
 			defer server.Close()
 
 			client := createTestOAuth2Client(tdg.CreateTestOAuth2ConfigWithTokenURL(server.URL))
+			defer os.Remove(client.storage.GetFilePath())
 
 			token, err := client.exchangeAuthorizationCode(tt.authCode, tt.redirectURI)
 
@@ -393,6 +395,7 @@ func TestOAuth2Client_RefreshToken(t *testing.T) {
 				ClientSecret: "test-client-secret",
 				TokenURL:     server.URL,
 			})
+			defer os.Remove(client.storage.GetFilePath())
 
 			token, err := client.refreshToken(tt.refreshToken)
 
@@ -441,6 +444,7 @@ func TestOAuth2Client_PerformWebAuthorization(t *testing.T) {
 		Scope:    "read write",
 		State:    "test-state",
 	})
+	defer os.Remove(client.storage.GetFilePath())
 
 	// Test that the function starts a server and returns proper URLs
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
@@ -464,6 +468,7 @@ func TestOAuth2Client_Authenticate_WithValidStoredToken(t *testing.T) {
 	tah := NewTestAssertionHelper()
 
 	client := createTestOAuth2Client(tdg.CreateTestOAuth2ConfigWithClientID("test-client-id"))
+	defer os.Remove(client.storage.GetFilePath())
 
 	// Store a valid token
 	validToken := tdg.CreateValidTestToken()
@@ -497,6 +502,7 @@ func TestOAuth2Client_Authenticate_WithExpiredStoredToken(t *testing.T) {
 	defer server.Close()
 
 	client := createTestOAuth2Client(tdg.CreateTestOAuth2ConfigWithTokenURL(server.URL))
+	defer os.Remove(client.storage.GetFilePath())
 
 	// Store an expired token
 	expiredToken := tdg.CreateExpiredTestToken()
@@ -520,6 +526,7 @@ func TestOAuth2Client_Authenticate_WithInvalidStoredToken(t *testing.T) {
 	tch := NewTestContextHelper()
 
 	client := createTestOAuth2Client(tdg.CreateTestOAuth2ConfigWithClientID("test-client-id"))
+	defer os.Remove(client.storage.GetFilePath())
 
 	// Store invalid token data
 	client.storage.Set("oauth2_token", "invalid-data")
@@ -609,6 +616,7 @@ func TestOAuth2Client_ForceRefresh(t *testing.T) {
 				ClientSecret: "test-client-secret",
 				TokenURL:     server.URL + "/token",
 			})
+			defer os.Remove(client.storage.GetFilePath())
 
 			// Setup storage
 			tt.setupStorage(client)
@@ -810,6 +818,7 @@ func TestOAuth2Client_AuthenticatedRequest(t *testing.T) {
 				ClientSecret: "test-client-secret",
 				TokenURL:     server.URL + "/token",
 			})
+			defer os.Remove(client.storage.GetFilePath())
 
 			// Setup storage
 			tt.setupStorage(client)
@@ -865,6 +874,7 @@ func TestOAuth2Client_AuthenticatedRequest_ContextCancellation(t *testing.T) {
 		ClientSecret: "test-client-secret",
 		TokenURL:     server.URL + "/token",
 	})
+	defer os.Remove(client.storage.GetFilePath())
 
 	// Store a valid token
 	token := &OAuth2Token{
@@ -902,6 +912,7 @@ func BenchmarkOAuth2Client_StoreToken(b *testing.B) {
 	client := createTestOAuth2Client(OAuth2Config{
 		ClientID: "test-client-id",
 	})
+	defer os.Remove(client.storage.GetFilePath())
 
 	token := &OAuth2Token{
 		AccessToken:  "access-token-123",
@@ -919,6 +930,7 @@ func BenchmarkOAuth2Client_LoadStoredToken(b *testing.B) {
 	client := createTestOAuth2Client(OAuth2Config{
 		ClientID: "test-client-id",
 	})
+	defer os.Remove(client.storage.GetFilePath())
 
 	// Pre-populate with token data
 	tokenData := map[string]interface{}{

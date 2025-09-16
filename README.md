@@ -157,6 +157,25 @@ Add the following to your Telegraf configuration:
 
 The metrics-agent runs under Telegraf's management via `inputs.execd`. Configure systemd to manage Telegraf:
 
+#### 1. Application Data Directory
+
+The metrics-agent will automatically create `/var/lib/metrics-agent/` on first startup if it has the necessary permissions. However, for production deployments, it's recommended to create the directory manually with proper ownership:
+
+```bash
+# Create the data directory (optional - will be created automatically if possible)
+sudo mkdir -p /var/lib/metrics-agent
+
+# Set ownership to telegraf user (recommended for production)
+sudo chown telegraf:telegraf /var/lib/metrics-agent
+
+# Set secure permissions
+sudo chmod 755 /var/lib/metrics-agent
+```
+
+**Note**: If the application cannot create or write to `/var/lib/metrics-agent/`, it will automatically fall back to the current directory for development compatibility.
+
+#### 2. Configure Telegraf Service
+
 Create or edit the systemd service file at `/etc/systemd/system/telegraf.service`:
 
 ```ini
@@ -179,7 +198,7 @@ StandardError=journal
 WantedBy=multi-user.target
 ```
 
-Enable and start the service:
+#### 3. Enable and Start Service
 
 ```bash
 sudo systemctl daemon-reload
@@ -188,6 +207,22 @@ sudo systemctl start telegraf
 ```
 
 **Note**: The metrics-agent process is automatically managed by Telegraf's `inputs.execd` plugin and doesn't need its own systemd service.
+
+### Storage Locations
+
+The metrics-agent follows Linux Filesystem Hierarchy Standard (FHS) for data storage:
+
+- **Application Data**: `/var/lib/metrics-agent/` - Stores persistent data like OAuth tokens and module state (production)
+- **Development Data**: `.data/` - Fallback location for development environments (automatically gitignored)
+- **Configuration**: `/etc/metrics-agent/` - System-wide configuration files
+- **Logs**: Handled by systemd/journald - Application logs are captured by systemd
+
+#### Development vs Production
+
+- **Development**: If `/var/lib/metrics-agent/` is not accessible, the application automatically falls back to a `.data/` subdirectory in the current directory
+- **Production**: The application will automatically create and use `/var/lib/metrics-agent/` if it has the necessary permissions. Manual setup is optional but recommended for proper ownership.
+
+**Note**: The `.data/` directory is automatically excluded from git via `.gitignore` to keep development data separate from the repository.
 
 ## Available Modules
 
@@ -279,9 +314,9 @@ Collects weather and climate data from Netatmo weather stations via the Netatmo 
    - The agent will automatically handle the rest!
 
 4. **Automatic Token Management**:
-   - **Tokens are stored securely** in `~/.config/metrics-agent/netatmo-storage.json`
+   - **Tokens are stored securely** in `/var/lib/metrics-agent/netatmo-storage.json`
    - **No need to re-authorize on each restart** - tokens are automatically loaded and refreshed
-   - **Secure file permissions** (600) ensure only you can read the tokens
+   - **Secure file permissions** (600) ensure only the application can read the tokens
    - **Automatic token refresh** when they expire (every ~3 hours)
 
 #### Metrics Collected
