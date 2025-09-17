@@ -1,9 +1,9 @@
-#!/bin/bash
+#!/bin/sh
 
 # Metrics Agent Installation Script
 # This script installs the latest version of metrics-agent from GitHub releases
 
-set -euo pipefail
+set -eu
 
 # Configuration
 REPO="janhuddel/metrics-agent"
@@ -39,7 +39,7 @@ log_error() {
 
 # Check if running as root
 check_root() {
-    if [[ $EUID -ne 0 ]]; then
+    if [ "$(id -u)" -ne 0 ]; then
         log_error "This script must be run as root (use sudo)"
         exit 1
     fi
@@ -47,7 +47,7 @@ check_root() {
 
 # Detect system architecture
 detect_arch() {
-    local arch=$(uname -m)
+    arch=$(uname -m)
     case $arch in
         x86_64)
             echo "amd64"
@@ -70,7 +70,7 @@ detect_arch() {
 
 # Detect operating system
 detect_os() {
-    local os=$(uname -s | tr '[:upper:]' '[:lower:]')
+    os=$(uname -s | tr '[:upper:]' '[:lower:]')
     case $os in
         linux)
             echo "linux"
@@ -84,10 +84,9 @@ detect_os() {
 
 # Get latest release version from GitHub API
 get_latest_version() {
-    local version
-    version=$(curl -s "https://api.github.com/repos/$REPO/releases/latest" | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
+    version=$(curl -s "https://api.github.com/repos/$REPO/releases/latest" | grep '"tag_name":' | sed 's/.*"\([^"]*\)".*/\1/')
     
-    if [[ -z "$version" ]]; then
+    if [ -z "$version" ]; then
         log_error "Failed to get latest version from GitHub API"
         exit 1
     fi
@@ -97,14 +96,14 @@ get_latest_version() {
 
 # Download and install binary
 install_binary() {
-    local version=$1
-    local os=$2
-    local arch=$3
+    version=$1
+    os=$2
+    arch=$3
     
     log_info "Installing metrics-agent version $version for $os-$arch"
     
     # Construct download URL
-    local download_url="https://github.com/$REPO/releases/download/$version/${BINARY_NAME}-${os}-${arch}"
+    download_url="https://github.com/$REPO/releases/download/$version/${BINARY_NAME}-${os}-${arch}"
     
     log_info "Downloading from: $download_url"
     
@@ -150,7 +149,7 @@ create_config() {
     log_info "Creating default configuration..."
     
     # Check if config already exists
-    if [[ -f "$CONFIG_FILE" ]]; then
+    if [ -f "$CONFIG_FILE" ]; then
         log_warning "Configuration file already exists: $CONFIG_FILE"
         log_warning "Skipping configuration creation to preserve existing settings"
         return
@@ -222,13 +221,12 @@ verify_installation() {
     log_info "Verifying installation..."
     
     # Check if binary exists and is executable
-    if [[ ! -x "$INSTALL_DIR/$BINARY_NAME" ]]; then
+    if [ ! -x "$INSTALL_DIR/$BINARY_NAME" ]; then
         log_error "Binary not found or not executable: $INSTALL_DIR/$BINARY_NAME"
         exit 1
     fi
     
     # Test binary version
-    local version_output
     if version_output=$("$INSTALL_DIR/$BINARY_NAME" -version 2>&1); then
         log_success "Binary is working correctly"
         log_info "Version: $version_output"
@@ -237,12 +235,12 @@ verify_installation() {
     fi
     
     # Check directories
-    if [[ ! -d "$CONFIG_DIR" ]]; then
+    if [ ! -d "$CONFIG_DIR" ]; then
         log_error "Config directory not found: $CONFIG_DIR"
         exit 1
     fi
     
-    if [[ ! -d "$DATA_DIR" ]]; then
+    if [ ! -d "$DATA_DIR" ]; then
         log_error "Data directory not found: $DATA_DIR"
         exit 1
     fi
@@ -294,12 +292,12 @@ main() {
     fi
     
     # Detect system
-    local os=$(detect_os)
-    local arch=$(detect_arch)
+    os=$(detect_os)
+    arch=$(detect_arch)
     log_info "Detected system: $os-$arch"
     
     # Get latest version
-    local version=$(get_latest_version)
+    version=$(get_latest_version)
     log_info "Latest version: $version"
     
     # Install binary
