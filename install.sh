@@ -94,13 +94,76 @@ get_latest_version() {
     echo "$version"
 }
 
+# Get current installed version
+get_current_version() {
+    if [ -x "$INSTALL_DIR/$BINARY_NAME" ]; then
+        if version_output=$("$INSTALL_DIR/$BINARY_NAME" -version 2>&1); then
+            # Extract version from output (assuming format like "metrics-agent v1.2.3")
+            echo "$version_output" | grep -o 'v[0-9]\+\.[0-9]\+\.[0-9]\+' | head -1
+        else
+            echo ""
+        fi
+    else
+        echo ""
+    fi
+}
+
+# Compare version strings (returns 0 if v1 >= v2, 1 otherwise)
+compare_versions() {
+    v1=$1
+    v2=$2
+    
+    # Remove 'v' prefix if present
+    v1=${v1#v}
+    v2=${v2#v}
+    
+    # Split versions into arrays
+    IFS='.' read -ra v1_parts <<< "$v1"
+    IFS='.' read -ra v2_parts <<< "$v2"
+    
+    # Compare each part
+    for i in "${!v1_parts[@]}"; do
+        if [ -z "${v2_parts[$i]}" ]; then
+            return 0  # v1 is longer, so it's newer
+        fi
+        
+        if [ "${v1_parts[$i]}" -gt "${v2_parts[$i]}" ]; then
+            return 0  # v1 is greater
+        elif [ "${v1_parts[$i]}" -lt "${v2_parts[$i]}" ]; then
+            return 1  # v1 is less
+        fi
+    done
+    
+    # If we get here, versions are equal or v2 is longer
+    if [ ${#v2_parts[@]} -gt ${#v1_parts[@]} ]; then
+        return 1  # v2 is longer, so it's newer
+    fi
+    
+    return 0  # versions are equal
+}
+
 # Download and install binary
 install_binary() {
     version=$1
     os=$2
     arch=$3
     
-    log_info "Installing metrics-agent version $version for $os-$arch"
+    # Check if binary already exists and compare versions
+    current_version=$(get_current_version)
+    if [ -n "$current_version" ]; then
+        log_info "Current installed version: $current_version"
+        log_info "Latest available version: $version"
+        
+        # Compare versions
+        if compare_versions "$current_version" "$version"; then
+            log_success "Binary is already up to date (version $current_version)"
+            return 0
+        else
+            log_info "Updating from $current_version to $version"
+        fi
+    else
+        log_info "No existing binary found, installing version $version for $os-$arch"
+    fi
     
     # Construct download URL for tar.gz archive
     archive_name="${BINARY_NAME}-${version}-${os}-${arch}.tar.gz"
