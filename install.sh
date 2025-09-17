@@ -22,19 +22,19 @@ NC='\033[0m' # No Color
 
 # Logging functions
 log_info() {
-    echo -e "${BLUE}[INFO]${NC} $1"
+    printf "${BLUE}[INFO]${NC} %s\n" "$1"
 }
 
 log_success() {
-    echo -e "${GREEN}[SUCCESS]${NC} $1"
+    printf "${GREEN}[SUCCESS]${NC} %s\n" "$1"
 }
 
 log_warning() {
-    echo -e "${YELLOW}[WARNING]${NC} $1"
+    printf "${YELLOW}[WARNING]${NC} %s\n" "$1"
 }
 
 log_error() {
-    echo -e "${RED}[ERROR]${NC} $1"
+    printf "${RED}[ERROR]${NC} %s\n" "$1"
 }
 
 # Check if running as root
@@ -380,6 +380,9 @@ main() {
     # Install binary
     install_binary "$version" "$os" "$arch"
     binary_installed=$?
+    
+    # Debug: Show what the function returned
+    log_info "install_binary returned: $binary_installed"
     
     # Only create directories, config, and set permissions if binary was actually installed
     if [ $binary_installed -eq 1 ]; then
