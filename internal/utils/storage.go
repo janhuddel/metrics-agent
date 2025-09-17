@@ -1,5 +1,8 @@
 // Package utils provides utility functions for the metrics agent.
+//
 // This file contains centralized storage utilities for modules.
+// It provides a thread-safe key-value storage system that persists data
+// to JSON files with secure permissions following Linux FHS standards.
 package utils
 
 import (
@@ -14,6 +17,13 @@ import (
 // Storage provides a thread-safe key-value storage system for modules.
 // It stores data in JSON files with secure permissions following the Linux
 // Filesystem Hierarchy Standard (FHS) for production deployments.
+//
+// The storage system automatically handles:
+// - File path determination with fallback hierarchy
+// - Secure file permissions (0600 for system directories, 0644 for development)
+// - Atomic file operations
+// - JSON serialization/deserialization
+// - Thread-safe concurrent access
 type Storage struct {
 	filePath string
 	data     map[string]interface{}
@@ -22,15 +32,21 @@ type Storage struct {
 
 // StorageConfig holds configuration for storage initialization.
 type StorageConfig struct {
-	// ModuleName is the name of the module using this storage
+	// ModuleName is the name of the module using this storage.
+	// This is used to generate the storage filename.
 	ModuleName string
-	// PreferredDir is the preferred directory for storage (default: "/var/lib/metrics-agent")
+
+	// PreferredDir is the preferred directory for storage (default: "/var/lib/metrics-agent").
+	// This follows Linux FHS standards for production deployments.
 	PreferredDir string
-	// FallbackDir is the fallback directory for development (default: ".data")
+
+	// FallbackDir is the fallback directory for development (default: ".data").
+	// Used when the preferred directory is not accessible.
 	FallbackDir string
 }
 
 // DefaultStorageConfig returns a default storage configuration.
+// It sets up the standard directory hierarchy for production and development environments.
 func DefaultStorageConfig(moduleName string) *StorageConfig {
 	return &StorageConfig{
 		ModuleName:   moduleName,

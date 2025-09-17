@@ -1,4 +1,10 @@
 // Package utils provides logging utilities with configurable levels.
+//
+// The logging system provides:
+// - Configurable log levels (DEBUG, INFO, WARN, ERROR)
+// - Structured logging with timestamps and caller information
+// - Thread-safe operations
+// - Global convenience functions
 package utils
 
 import (
@@ -11,17 +17,22 @@ import (
 	"time"
 )
 
-// LogLevel represents the different logging levels
+// LogLevel represents the different logging levels.
+// Higher values indicate more severe log levels.
 type LogLevel int
 
 const (
+	// DEBUG is the lowest log level, used for detailed diagnostic information.
 	DEBUG LogLevel = iota
+	// INFO is used for general informational messages.
 	INFO
+	// WARN is used for warning messages that indicate potential issues.
 	WARN
+	// ERROR is the highest log level, used for error messages.
 	ERROR
 )
 
-// String returns the string representation of the log level
+// String returns the string representation of the log level.
 func (l LogLevel) String() string {
 	switch l {
 	case DEBUG:
@@ -37,7 +48,8 @@ func (l LogLevel) String() string {
 	}
 }
 
-// Logger provides a structured logger with configurable levels
+// Logger provides a structured logger with configurable levels.
+// It is thread-safe and supports multiple output destinations.
 type Logger struct {
 	mu     sync.RWMutex
 	level  LogLevel
@@ -50,7 +62,8 @@ var (
 	once         sync.Once
 )
 
-// GetGlobalLogger returns the global logger instance (for testing purposes)
+// GetGlobalLogger returns the global logger instance (for testing purposes).
+// This function is primarily used in tests to access the global logger.
 func GetGlobalLogger() *Logger {
 	once.Do(func() {
 		globalLogger = NewLogger(INFO, os.Stderr)
@@ -58,12 +71,14 @@ func GetGlobalLogger() *Logger {
 	return globalLogger
 }
 
-// SetGlobalLogger sets the global logger instance (for testing purposes)
+// SetGlobalLogger sets the global logger instance (for testing purposes).
+// This function is primarily used in tests to replace the global logger.
 func SetGlobalLogger(logger *Logger) {
 	globalLogger = logger
 }
 
-// GetLogger returns the global logger instance
+// GetLogger returns the global logger instance.
+// It initializes the logger with default settings if it hasn't been created yet.
 func GetLogger() *Logger {
 	once.Do(func() {
 		globalLogger = NewLogger(INFO, os.Stderr)
@@ -71,7 +86,7 @@ func GetLogger() *Logger {
 	return globalLogger
 }
 
-// NewLogger creates a new logger with the specified level and output writer
+// NewLogger creates a new logger with the specified level and output writer.
 func NewLogger(level LogLevel, output io.Writer) *Logger {
 	return &Logger{
 		level:  level,
@@ -79,21 +94,23 @@ func NewLogger(level LogLevel, output io.Writer) *Logger {
 	}
 }
 
-// SetLevel sets the logging level
+// SetLevel sets the logging level.
+// Only messages at or above this level will be logged.
 func (l *Logger) SetLevel(level LogLevel) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.level = level
 }
 
-// GetLevel returns the current logging level
+// GetLevel returns the current logging level.
 func (l *Logger) GetLevel() LogLevel {
 	l.mu.RLock()
 	defer l.mu.RUnlock()
 	return l.level
 }
 
-// SetOutput sets the output writer for all log levels
+// SetOutput sets the output writer for all log levels.
+// This can be used to redirect log output to different destinations.
 func (l *Logger) SetOutput(output io.Writer) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -134,84 +151,54 @@ func (l *Logger) formatLogMessage(level LogLevel, message string) string {
 	return fmt.Sprintf("%s [%-5s] [%s:%d] %s\n", timestamp, level.String(), filename, line, message)
 }
 
-// Debug logs a debug message
-func (l *Logger) Debug(v ...interface{}) {
-	if l.shouldLog(DEBUG) {
+// logMessage is a helper function that handles the common logging logic.
+func (l *Logger) logMessage(level LogLevel, message string) {
+	if l.shouldLog(level) {
 		l.mu.RLock()
 		output := l.output
 		l.mu.RUnlock()
-		fmt.Fprint(output, l.formatLogMessage(DEBUG, fmt.Sprint(v...)))
+		fmt.Fprint(output, l.formatLogMessage(level, message))
 	}
+}
+
+// Debug logs a debug message
+func (l *Logger) Debug(v ...interface{}) {
+	l.logMessage(DEBUG, fmt.Sprint(v...))
 }
 
 // Debugf logs a formatted debug message
 func (l *Logger) Debugf(format string, v ...interface{}) {
-	if l.shouldLog(DEBUG) {
-		l.mu.RLock()
-		output := l.output
-		l.mu.RUnlock()
-		fmt.Fprint(output, l.formatLogMessage(DEBUG, fmt.Sprintf(format, v...)))
-	}
+	l.logMessage(DEBUG, fmt.Sprintf(format, v...))
 }
 
 // Info logs an info message
 func (l *Logger) Info(v ...interface{}) {
-	if l.shouldLog(INFO) {
-		l.mu.RLock()
-		output := l.output
-		l.mu.RUnlock()
-		fmt.Fprint(output, l.formatLogMessage(INFO, fmt.Sprint(v...)))
-	}
+	l.logMessage(INFO, fmt.Sprint(v...))
 }
 
 // Infof logs a formatted info message
 func (l *Logger) Infof(format string, v ...interface{}) {
-	if l.shouldLog(INFO) {
-		l.mu.RLock()
-		output := l.output
-		l.mu.RUnlock()
-		fmt.Fprint(output, l.formatLogMessage(INFO, fmt.Sprintf(format, v...)))
-	}
+	l.logMessage(INFO, fmt.Sprintf(format, v...))
 }
 
 // Warn logs a warning message
 func (l *Logger) Warn(v ...interface{}) {
-	if l.shouldLog(WARN) {
-		l.mu.RLock()
-		output := l.output
-		l.mu.RUnlock()
-		fmt.Fprint(output, l.formatLogMessage(WARN, fmt.Sprint(v...)))
-	}
+	l.logMessage(WARN, fmt.Sprint(v...))
 }
 
 // Warnf logs a formatted warning message
 func (l *Logger) Warnf(format string, v ...interface{}) {
-	if l.shouldLog(WARN) {
-		l.mu.RLock()
-		output := l.output
-		l.mu.RUnlock()
-		fmt.Fprint(output, l.formatLogMessage(WARN, fmt.Sprintf(format, v...)))
-	}
+	l.logMessage(WARN, fmt.Sprintf(format, v...))
 }
 
 // Error logs an error message
 func (l *Logger) Error(v ...interface{}) {
-	if l.shouldLog(ERROR) {
-		l.mu.RLock()
-		output := l.output
-		l.mu.RUnlock()
-		fmt.Fprint(output, l.formatLogMessage(ERROR, fmt.Sprint(v...)))
-	}
+	l.logMessage(ERROR, fmt.Sprint(v...))
 }
 
 // Errorf logs a formatted error message
 func (l *Logger) Errorf(format string, v ...interface{}) {
-	if l.shouldLog(ERROR) {
-		l.mu.RLock()
-		output := l.output
-		l.mu.RUnlock()
-		fmt.Fprint(output, l.formatLogMessage(ERROR, fmt.Sprintf(format, v...)))
-	}
+	l.logMessage(ERROR, fmt.Sprintf(format, v...))
 }
 
 // Fatal logs a fatal error message and exits
@@ -239,7 +226,9 @@ func (l *Logger) shouldLog(level LogLevel) bool {
 	return level >= l.level
 }
 
-// ParseLogLevel parses a string log level into a LogLevel constant
+// ParseLogLevel parses a string log level into a LogLevel constant.
+// It accepts case-insensitive strings: "debug", "info", "warn"/"warning", "error".
+// Returns INFO as the default if the string is not recognized.
 func ParseLogLevel(level string) LogLevel {
 	switch strings.ToLower(level) {
 	case "debug":
@@ -257,120 +246,63 @@ func ParseLogLevel(level string) LogLevel {
 
 // Global convenience functions that use the global logger
 
-// SetGlobalLogLevel sets the global logger level
+// SetGlobalLogLevel sets the global logger level.
 func SetGlobalLogLevel(level LogLevel) {
 	GetLogger().SetLevel(level)
 }
 
-// SetGlobalLogLevelFromString sets the global logger level from a string
+// SetGlobalLogLevelFromString sets the global logger level from a string.
+// It accepts case-insensitive strings: "debug", "info", "warn"/"warning", "error".
 func SetGlobalLogLevelFromString(level string) {
 	SetGlobalLogLevel(ParseLogLevel(level))
 }
 
 // Debug logs a debug message using the global logger
 func Debug(v ...interface{}) {
-	logger := GetLogger()
-	if logger.shouldLog(DEBUG) {
-		logger.mu.RLock()
-		output := logger.output
-		logger.mu.RUnlock()
-		fmt.Fprint(output, logger.formatLogMessage(DEBUG, fmt.Sprint(v...)))
-	}
+	GetLogger().Debug(v...)
 }
 
 // Debugf logs a formatted debug message using the global logger
 func Debugf(format string, v ...interface{}) {
-	logger := GetLogger()
-	if logger.shouldLog(DEBUG) {
-		logger.mu.RLock()
-		output := logger.output
-		logger.mu.RUnlock()
-		fmt.Fprint(output, logger.formatLogMessage(DEBUG, fmt.Sprintf(format, v...)))
-	}
+	GetLogger().Debugf(format, v...)
 }
 
 // Info logs an info message using the global logger
 func Info(v ...interface{}) {
-	logger := GetLogger()
-	if logger.shouldLog(INFO) {
-		logger.mu.RLock()
-		output := logger.output
-		logger.mu.RUnlock()
-		fmt.Fprint(output, logger.formatLogMessage(INFO, fmt.Sprint(v...)))
-	}
+	GetLogger().Info(v...)
 }
 
 // Infof logs a formatted info message using the global logger
 func Infof(format string, v ...interface{}) {
-	logger := GetLogger()
-	if logger.shouldLog(INFO) {
-		logger.mu.RLock()
-		output := logger.output
-		logger.mu.RUnlock()
-		fmt.Fprint(output, logger.formatLogMessage(INFO, fmt.Sprintf(format, v...)))
-	}
+	GetLogger().Infof(format, v...)
 }
 
 // Warn logs a warning message using the global logger
 func Warn(v ...interface{}) {
-	logger := GetLogger()
-	if logger.shouldLog(WARN) {
-		logger.mu.RLock()
-		output := logger.output
-		logger.mu.RUnlock()
-		fmt.Fprint(output, logger.formatLogMessage(WARN, fmt.Sprint(v...)))
-	}
+	GetLogger().Warn(v...)
 }
 
 // Warnf logs a formatted warning message using the global logger
 func Warnf(format string, v ...interface{}) {
-	logger := GetLogger()
-	if logger.shouldLog(WARN) {
-		logger.mu.RLock()
-		output := logger.output
-		logger.mu.RUnlock()
-		fmt.Fprint(output, logger.formatLogMessage(WARN, fmt.Sprintf(format, v...)))
-	}
+	GetLogger().Warnf(format, v...)
 }
 
 // Error logs an error message using the global logger
 func Error(v ...interface{}) {
-	logger := GetLogger()
-	if logger.shouldLog(ERROR) {
-		logger.mu.RLock()
-		output := logger.output
-		logger.mu.RUnlock()
-		fmt.Fprint(output, logger.formatLogMessage(ERROR, fmt.Sprint(v...)))
-	}
+	GetLogger().Error(v...)
 }
 
 // Errorf logs a formatted error message using the global logger
 func Errorf(format string, v ...interface{}) {
-	logger := GetLogger()
-	if logger.shouldLog(ERROR) {
-		logger.mu.RLock()
-		output := logger.output
-		logger.mu.RUnlock()
-		fmt.Fprint(output, logger.formatLogMessage(ERROR, fmt.Sprintf(format, v...)))
-	}
+	GetLogger().Errorf(format, v...)
 }
 
 // Fatal logs a fatal error message and exits using the global logger
 func Fatal(v ...interface{}) {
-	logger := GetLogger()
-	logger.mu.RLock()
-	output := logger.output
-	logger.mu.RUnlock()
-	fmt.Fprint(output, logger.formatLogMessage(ERROR, fmt.Sprint(v...)))
-	os.Exit(1)
+	GetLogger().Fatal(v...)
 }
 
 // Fatalf logs a formatted fatal error message and exits using the global logger
 func Fatalf(format string, v ...interface{}) {
-	logger := GetLogger()
-	logger.mu.RLock()
-	output := logger.output
-	logger.mu.RUnlock()
-	fmt.Fprint(output, logger.formatLogMessage(ERROR, fmt.Sprintf(format, v...)))
-	os.Exit(1)
+	GetLogger().Fatalf(format, v...)
 }

@@ -11,23 +11,7 @@ import (
 )
 
 // Test helper function to filter enabled modules
-func filterEnabledModules(allModuleNames []string, globalConfig *config.GlobalConfig) (enabled []string, disabled []string) {
-	for _, moduleName := range allModuleNames {
-		enabledFlag := false
-		if globalConfig != nil && globalConfig.Modules != nil {
-			if moduleConfig, exists := globalConfig.Modules[moduleName]; exists {
-				enabledFlag = moduleConfig.Enabled
-			}
-		}
-
-		if enabledFlag {
-			enabled = append(enabled, moduleName)
-		} else {
-			disabled = append(disabled, moduleName)
-		}
-	}
-	return enabled, disabled
-}
+// This function is now defined in main.go and exported for testing
 
 func TestFilterEnabledModules(t *testing.T) {
 	// Register test modules

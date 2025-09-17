@@ -225,15 +225,19 @@ func (c *OAuth2Client) performWebAuthorization(ctx context.Context) (string, str
 		}
 	}()
 
-	// Open browser automatically
-	Infof("Opening browser for authorization...")
-	Infof("If the browser doesn't open automatically, please visit: http://%s:%d", hostname, port)
+	/*
+		// Open browser automatically
+		Infof("Opening browser for authorization...")
+		Infof("If the browser doesn't open automatically, please visit: http://%s:%d", hostname, port)
 
-	// Try to open browser
-	if err := openBrowser(fmt.Sprintf("http://%s:%d", hostname, port)); err != nil {
-		Warnf("Could not open browser automatically: %v", err)
-		Infof("Please manually open: http://%s:%d", hostname, port)
-	}
+		// Try to open browser
+		if err := openBrowser(fmt.Sprintf("http://%s:%d", hostname, port)); err != nil {
+			Warnf("Could not open browser automatically: %v", err)
+			Infof("Please manually open: http://%s:%d", hostname, port)
+		}
+	*/
+
+	Infof("Please manually open: http://%s:%d", hostname, port)
 
 	// Wait for authorization code or error
 	select {

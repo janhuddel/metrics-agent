@@ -1,5 +1,11 @@
 // Package metrics provides data structures and utilities for handling metrics
 // in InfluxDB Line Protocol format.
+//
+// The package supports:
+// - Metric creation and validation
+// - Line Protocol serialization
+// - Field type conversion and validation
+// - Safe metric handling with error recovery
 package metrics
 
 import (
@@ -11,16 +17,38 @@ import (
 	"github.com/janhuddel/metrics-agent/internal/utils"
 )
 
-// Metric represents a single metric measurement.
+// Metric represents a single metric measurement in InfluxDB Line Protocol format.
+// It contains all the necessary information to serialize a metric measurement.
 type Metric struct {
-	Name      string                 // Measurement name, e.g., "cpu_usage"
-	Tags      map[string]string      // Key-value tags, e.g., {"host":"foo", "vendor":"demo"}
-	Fields    map[string]interface{} // Key-value fields, e.g., {"value": 42, "temp": 21.5}
-	Timestamp time.Time              // Timestamp for the measurement
+	// Name is the measurement name (e.g., "cpu_usage", "temperature", "electricity").
+	// It must not be empty and will be escaped for Line Protocol format.
+	Name string
+
+	// Tags are key-value pairs that identify the metric (e.g., {"host":"server1", "vendor":"tasmota"}).
+	// Tags are indexed in InfluxDB and should be used for filtering and grouping.
+	// Keys and values will be escaped for Line Protocol format.
+	Tags map[string]string
+
+	// Fields are key-value pairs containing the actual metric data (e.g., {"value": 42, "temp": 21.5}).
+	// Fields are not indexed and should contain the actual measurement values.
+	// Supported types: int, int32, int64, float32, float64, bool, string.
+	Fields map[string]interface{}
+
+	// Timestamp is the time when the measurement was taken.
+	// If zero, the current time will be used during serialization.
+	Timestamp time.Time
 }
 
 // ToLineProtocol converts a Metric to InfluxDB Line Protocol format.
+// It returns a string in the format: measurement,tag1=value1,tag2=value2 field1=value1i,field2=value2f timestamp
 // Example: cpu_usage,vendor=demo,host=foo value=42i,temp=21.5 1634234234000000000
+//
+// The function performs the following operations:
+// - Validates that the metric name is not empty
+// - Escapes special characters in names, tags, and fields
+// - Sorts tags and fields alphabetically for consistent output
+// - Converts field values to appropriate Line Protocol types
+// - Uses the metric's timestamp or current time if timestamp is zero
 func (m Metric) ToLineProtocol() (string, error) {
 	if m.Name == "" {
 		return "", fmt.Errorf("metric name is required")
@@ -89,7 +117,15 @@ func (m Metric) ToLineProtocol() (string, error) {
 }
 
 // ValidateAndConvertFields validates and converts field values to supported types.
-// Returns a new map with converted values and logs warnings for unsupported types.
+// It processes all fields in the input map and returns a new map with converted values.
+// Unsupported types are logged as warnings and excluded from the result.
+//
+// Supported field types:
+// - Numeric: int, int32, int64, float32, float64
+// - Boolean: bool
+// - String: string
+// - Collections: []interface{}, map[string]interface{} (converted to strings)
+// - Nil values: converted to empty strings
 func ValidateAndConvertFields(fields map[string]interface{}) map[string]interface{} {
 	converted := make(map[string]interface{})
 
@@ -149,6 +185,10 @@ func convertToSupportedType(value interface{}) (interface{}, error) {
 }
 
 // Validate checks if the metric can be serialized and returns an error if not.
+// It performs the following validations:
+// - Ensures the metric name is not empty
+// - Validates and converts field values to supported types
+// - Ensures at least one valid field exists after conversion
 func (m Metric) Validate() error {
 	if m.Name == "" {
 		return fmt.Errorf("metric name is required")
@@ -164,7 +204,8 @@ func (m Metric) Validate() error {
 }
 
 // ToLineProtocolSafe converts a Metric to InfluxDB Line Protocol format with robust error handling.
-// It validates and converts fields before serialization.
+// It validates and converts fields before serialization, ensuring that the output is always valid.
+// This is the recommended method for serializing metrics as it handles type conversion gracefully.
 func (m Metric) ToLineProtocolSafe() (string, error) {
 	if err := m.Validate(); err != nil {
 		return "", err
@@ -182,6 +223,7 @@ func (m Metric) ToLineProtocolSafe() (string, error) {
 }
 
 // escape escapes special characters in strings for Line Protocol format.
+// It escapes commas, spaces, and equals signs that have special meaning in Line Protocol.
 func escape(s string) string {
 	r := strings.NewReplacer(",", "\\,", " ", "\\ ", "=", "\\=")
 	return r.Replace(s)

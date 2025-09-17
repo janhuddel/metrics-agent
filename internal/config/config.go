@@ -1,6 +1,12 @@
 // Package config provides a centralized configuration system for all modules.
 // It supports loading configuration from JSON files with module-specific overrides
 // and common settings.
+//
+// The configuration system follows these principles:
+// - Modules are disabled by default for security
+// - Configuration can be loaded from multiple file locations
+// - Module-specific settings are merged with defaults
+// - Global settings like log level are applied system-wide
 package config
 
 import (
@@ -16,55 +22,75 @@ import (
 	"github.com/janhuddel/metrics-agent/internal/utils"
 )
 
-// GlobalConfigPath holds the path to the global configuration file
-// This is set when the application starts and used by modules
+// GlobalConfigPath holds the path to the global configuration file.
+// This is set when the application starts and used by modules to locate
+// the configuration file when loading module-specific settings.
 var GlobalConfigPath string
 
 // BaseConfig represents the base configuration that all modules can embed.
+// It provides common functionality for device name overrides and custom settings.
 type BaseConfig struct {
-	// Module-specific overrides (device topic/ID -> friendly name)
+	// FriendlyNameOverrides maps device IDs to human-readable names.
+	// This allows modules to override device names for better readability in metrics.
 	FriendlyNameOverrides map[string]string `json:"friendly_name_overrides,omitempty"`
 
-	// Module-specific custom settings
+	// Custom contains module-specific configuration settings.
+	// The structure depends on the individual module's requirements.
 	Custom map[string]interface{} `json:"custom,omitempty"`
 }
 
 // GetFriendlyName returns the friendly name for a device, checking for overrides first.
+// It follows this priority order:
+// 1. Override from FriendlyNameOverrides map
+// 2. Device's own friendly name
+// 3. Device name as fallback
 func (bc *BaseConfig) GetFriendlyName(deviceID string, deviceFriendlyName string, deviceName string) string {
 	return GetFriendlyName(deviceID, deviceFriendlyName, deviceName, bc.FriendlyNameOverrides)
 }
 
 // ModuleConfig represents the base configuration that all modules can use.
+// It includes common settings and embeds BaseConfig for device-specific functionality.
 type ModuleConfig struct {
-	// Common settings that apply to all modules
+	// LogLevel sets the logging level for this specific module.
+	// If not set, the global log level is used.
 	LogLevel string `json:"log_level,omitempty"`
 
-	// Module activation setting - defaults to false (disabled)
+	// Enabled controls whether the module should be started.
+	// Defaults to false (disabled) for security - modules must be explicitly enabled.
 	Enabled bool `json:"enabled,omitempty"`
 
-	// Base configuration that modules can embed
+	// BaseConfig provides common functionality for device name overrides and custom settings.
 	BaseConfig `json:",inline"`
 }
 
 // GlobalConfig represents the global configuration file structure.
+// It contains system-wide settings and module-specific configurations.
 type GlobalConfig struct {
-	// Global settings
+	// LogLevel sets the global logging level for the application.
+	// Valid values: "debug", "info", "warn", "error"
 	LogLevel string `json:"log_level,omitempty"`
 
-	// Module restart settings
+	// ModuleRestartLimit controls how many times a module can restart before the process exits.
+	// - 0: unlimited restarts (not recommended for production)
+	// - 1: exit on first failure
+	// - 3: default, good for telegraf/systemd deployments
+	// - negative values: fall back to default (3)
 	ModuleRestartLimit int `json:"module_restart_limit,omitempty"`
 
-	// Module-specific configurations
+	// Modules contains configuration for each available module.
+	// Only modules with "enabled": true will be started.
 	Modules map[string]ModuleConfig `json:"modules,omitempty"`
 }
 
-// Loader handles loading configuration from JSON files.
+// Loader handles loading configuration from JSON files for specific modules.
+// It provides a clean interface for loading and merging configuration data.
 type Loader struct {
 	configPath string
 	moduleName string
 }
 
 // NewLoader creates a new configuration loader for a specific module.
+// The loader will automatically discover the configuration file location.
 func NewLoader(moduleName string) *Loader {
 	return &Loader{
 		moduleName: moduleName,
@@ -72,6 +98,7 @@ func NewLoader(moduleName string) *Loader {
 }
 
 // NewLoaderWithPath creates a new configuration loader for a specific module with a custom config path.
+// This is useful when you need to load configuration from a specific file location.
 func NewLoaderWithPath(moduleName string, configPath string) *Loader {
 	return &Loader{
 		moduleName: moduleName,
@@ -80,11 +107,14 @@ func NewLoaderWithPath(moduleName string, configPath string) *Loader {
 }
 
 // SetConfigPath sets a specific configuration file path.
+// This overrides the automatic configuration file discovery.
 func (l *Loader) SetConfigPath(path string) {
 	l.configPath = path
 }
 
 // LoadConfig loads configuration for the module from JSON file.
+// It starts with the provided default configuration and merges in any
+// module-specific settings found in the configuration file.
 func (l *Loader) LoadConfig(defaultConfig interface{}) (interface{}, error) {
 	// Start with default configuration
 	config := l.cloneConfig(defaultConfig)
@@ -272,7 +302,11 @@ func (l *Loader) cloneConfig(config interface{}) interface{} {
 }
 
 // GetFriendlyName returns the friendly name for a device, checking for overrides first.
-// This is a utility function that modules can use.
+// This is a utility function that modules can use to get human-readable device names.
+// It follows this priority order:
+// 1. Override from the overrides map
+// 2. Device's own friendly name
+// 3. Device name as fallback
 func GetFriendlyName(deviceID string, deviceFriendlyName string, deviceName string, overrides map[string]string) string {
 	// Check for override first
 	if override, exists := overrides[deviceID]; exists {
@@ -287,6 +321,8 @@ func GetFriendlyName(deviceID string, deviceFriendlyName string, deviceName stri
 }
 
 // LoadGlobalConfig loads the global configuration and applies global settings like log level.
+// It automatically discovers the configuration file location using GetGlobalConfigPath().
+// If no configuration file is found, it returns a default configuration.
 func LoadGlobalConfig() (*GlobalConfig, error) {
 	configPath := GetGlobalConfigPath()
 	if configPath == "" {
@@ -297,6 +333,7 @@ func LoadGlobalConfig() (*GlobalConfig, error) {
 }
 
 // LoadGlobalConfigFromPath loads the global configuration from a specific path.
+// It validates that the file exists and contains valid JSON before parsing.
 func LoadGlobalConfigFromPath(configPath string) (*GlobalConfig, error) {
 	// Check if config file exists
 	if _, err := os.Stat(configPath); os.IsNotExist(err) {
@@ -318,12 +355,19 @@ func LoadGlobalConfigFromPath(configPath string) (*GlobalConfig, error) {
 }
 
 // SetLogLevel sets the global log level based on the configuration.
+// It accepts standard log level strings: "debug", "info", "warn", "error".
 func SetLogLevel(level string) {
 	utils.SetGlobalLogLevelFromString(level)
 	utils.Debugf("Log level set to: %s", level)
 }
 
 // GetGlobalConfigPath determines the global configuration file path to use.
+// It searches for configuration files in the following order:
+// 1. metrics-agent.json in current directory
+// 2. config/metrics-agent.json
+// 3. config.json in current directory
+// 4. config/config.json
+// Returns an empty string if no configuration file is found.
 func GetGlobalConfigPath() string {
 	// Try common locations
 	possiblePaths := []string{
