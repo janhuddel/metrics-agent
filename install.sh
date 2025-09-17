@@ -102,25 +102,45 @@ install_binary() {
     
     log_info "Installing metrics-agent version $version for $os-$arch"
     
-    # Construct download URL
-    download_url="https://github.com/$REPO/releases/download/$version/${BINARY_NAME}-${os}-${arch}"
+    # Construct download URL for tar.gz archive
+    archive_name="${BINARY_NAME}-${version}-${os}-${arch}.tar.gz"
+    download_url="https://github.com/$REPO/releases/download/$version/$archive_name"
     
     log_info "Downloading from: $download_url"
     
-    # Download binary
-    if ! curl -L -o "/tmp/$BINARY_NAME" "$download_url"; then
-        log_error "Failed to download binary from GitHub releases"
+    # Download archive
+    if ! curl -L -o "/tmp/$archive_name" "$download_url"; then
+        log_error "Failed to download archive from GitHub releases"
+        exit 1
+    fi
+    
+    # Extract archive
+    log_info "Extracting archive..."
+    if ! tar -xzf "/tmp/$archive_name" -C "/tmp/"; then
+        log_error "Failed to extract archive"
+        rm -f "/tmp/$archive_name"
+        exit 1
+    fi
+    
+    # Find the extracted binary
+    extracted_binary="/tmp/${BINARY_NAME}-${os}-${arch}"
+    if [ ! -f "$extracted_binary" ]; then
+        log_error "Extracted binary not found: $extracted_binary"
+        rm -f "/tmp/$archive_name"
         exit 1
     fi
     
     # Make binary executable
-    chmod +x "/tmp/$BINARY_NAME"
+    chmod +x "$extracted_binary"
     
     # Install binary
-    if ! mv "/tmp/$BINARY_NAME" "$INSTALL_DIR/$BINARY_NAME"; then
+    if ! mv "$extracted_binary" "$INSTALL_DIR/$BINARY_NAME"; then
         log_error "Failed to install binary to $INSTALL_DIR"
         exit 1
     fi
+    
+    # Clean up
+    rm -f "/tmp/$archive_name"
     
     log_success "Binary installed to $INSTALL_DIR/$BINARY_NAME"
 }
