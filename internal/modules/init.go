@@ -6,6 +6,7 @@
 package modules
 
 import (
+	"github.com/janhuddel/metrics-agent/internal/modules/demo"
 	"github.com/janhuddel/metrics-agent/internal/modules/netatmo"
 	"github.com/janhuddel/metrics-agent/internal/modules/opendtu"
 	"github.com/janhuddel/metrics-agent/internal/modules/tasmota"
@@ -17,8 +18,8 @@ var Global = NewRegistry()
 
 func init() {
 	// Register all available modules
-	// Note: The demo module is commented out for production use
-	//Global.Register("demo", demo.Run)
+	// Note: The demo module is enabled for testing signal handling
+	Global.Register("demo", demo.Run)
 	Global.Register("tasmota", tasmota.Run)
 	Global.Register("netatmo", netatmo.Run)
 	Global.Register("opendtu", opendtu.Run)

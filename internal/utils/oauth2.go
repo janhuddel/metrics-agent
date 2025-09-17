@@ -239,7 +239,7 @@ func (c *OAuth2Client) performWebAuthorization(ctx context.Context) (string, str
 
 	Infof("Please manually open: http://%s:%d", hostname, port)
 
-	// Wait for authorization code or error
+	// Wait for authorization code or error with context cancellation support
 	select {
 	case authCode := <-authCodeChan:
 		// Shutdown server
@@ -259,7 +259,7 @@ func (c *OAuth2Client) performWebAuthorization(ctx context.Context) (string, str
 		return "", "", err
 
 	case <-ctx.Done():
-		// Context cancelled
+		// Context cancelled - this is the most important case for signal handling
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		server.Shutdown(shutdownCtx)

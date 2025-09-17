@@ -148,8 +148,12 @@ func (mm *ModuleManager) run() {
 		// Get restart configuration
 		maxRestarts := mm.getRestartLimit()
 
-		// Run all modules concurrently
-		mm.runModules(ctx, enabledModules, maxRestarts)
+		// Run all modules concurrently and wait for either completion or signal
+		done := make(chan struct{})
+		go func() {
+			mm.runModules(ctx, enabledModules, maxRestarts)
+			close(done)
+		}()
 
 		// Wait for either all modules to complete or a signal
 		select {
@@ -159,7 +163,7 @@ func (mm *ModuleManager) run() {
 				continue // Restart the loop
 			}
 			return // Exit the process
-		case <-ctx.Done():
+		case <-done:
 			// All modules completed normally
 			utils.Infof("All modules completed normally")
 			mm.cleanup(cancel)
@@ -252,27 +256,42 @@ func (mm *ModuleManager) runModule(ctx context.Context, wg *sync.WaitGroup, modu
 	restartCount := 0
 
 	for {
+		// Check for context cancellation before each iteration
 		select {
 		case <-ctx.Done():
 			utils.Infof("[%s] module stopped due to context cancellation", moduleName)
 			return
 		default:
-			mm.executeModule(ctx, moduleName, restartCount, maxRestarts)
+		}
 
-			// Check if we should restart or exit
-			select {
-			case <-ctx.Done():
-				return
-			default:
-				restartCount++
-				if maxRestarts > 0 && restartCount >= maxRestarts {
-					utils.Errorf("[%s] module failed %d times, exiting program", moduleName, restartCount)
-					// Signal other modules to stop and exit
-					return
-				}
-				mm.logRestart(moduleName, restartCount, maxRestarts)
-				time.Sleep(1 * time.Second) // Brief delay before restart
-			}
+		// Execute the module
+		mm.executeModule(ctx, moduleName, restartCount, maxRestarts)
+
+		// Check for context cancellation after module execution
+		select {
+		case <-ctx.Done():
+			utils.Infof("[%s] module stopped due to context cancellation", moduleName)
+			return
+		default:
+		}
+
+		// Increment restart count and check limits
+		restartCount++
+		if maxRestarts > 0 && restartCount >= maxRestarts {
+			utils.Errorf("[%s] module failed %d times, exiting program", moduleName, restartCount)
+			return
+		}
+
+		// Log restart and wait with context cancellation support
+		mm.logRestart(moduleName, restartCount, maxRestarts)
+
+		// Use context-aware sleep instead of time.Sleep
+		select {
+		case <-ctx.Done():
+			utils.Infof("[%s] module stopped due to context cancellation during restart delay", moduleName)
+			return
+		case <-time.After(1 * time.Second):
+			// Continue to next iteration
 		}
 	}
 }
