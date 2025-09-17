@@ -7,6 +7,7 @@ package modules
 
 import (
 	"github.com/janhuddel/metrics-agent/internal/modules/netatmo"
+	"github.com/janhuddel/metrics-agent/internal/modules/opendtu"
 	"github.com/janhuddel/metrics-agent/internal/modules/tasmota"
 )
 
@@ -20,4 +21,5 @@ func init() {
 	//Global.Register("demo", demo.Run)
 	Global.Register("tasmota", tasmota.Run)
 	Global.Register("netatmo", netatmo.Run)
+	Global.Register("opendtu", opendtu.Run)
 }

@@ -1,33 +1,47 @@
 {
-    "log_level": "info",
-    "module_restart_limit": 1,
-    "modules": {
-        "tasmota": {
-            "enabled": true,
-            "friendly_name_overrides": {
-                "tasmota_6886BC.0": "Filteranlage",
-                "tasmota_6886BC.1": "Wärmepumpe"
-            },
-            "custom": {
-                "broker": "tcp://localost:1883",
-                "timeout": "30s",
-                "keep_alive": "60s",
-                "ping_timeout": "10s"
-            }
-        },
-        "netatmo": {
-            "enabled": false,
-            "friendly_name_overrides": {
-                "70:ee:50:xx:xx:xx": "Indoor Station",
-                "02:00:00:xx:xx:xx": "Outdoor Module"
-            },
-            "custom": {
-                "client_id": "your_netatmo_client_id",
-                "client_secret": "your_netatmo_client_secret",
-                "timeout": "30s",
-                "interval": "5m",
-                "hostname": "192.168.1.100"
-            }
-        }
+  "log_level": "info",
+  "module_restart_limit": 1,
+  "modules": {
+    "tasmota": {
+      "enabled": true,
+      "friendly_name_overrides": {
+        "tasmota_6886BC.0": "Filteranlage",
+        "tasmota_6886BC.1": "Wärmepumpe"
+      },
+      "custom": {
+        "broker": "tcp://localost:1883",
+        "timeout": "30s",
+        "keep_alive": "60s",
+        "ping_timeout": "10s"
+      }
+    },
+    "netatmo": {
+      "enabled": false,
+      "friendly_name_overrides": {
+        "70:ee:50:xx:xx:xx": "Indoor Station",
+        "02:00:00:xx:xx:xx": "Outdoor Module"
+      },
+      "custom": {
+        "client_id": "your_netatmo_client_id",
+        "client_secret": "your_netatmo_client_secret",
+        "timeout": "30s",
+        "interval": "5m",
+        "hostname": "192.168.1.100"
+      }
+    },
+    "opendtu": {
+      "enabled": false,
+      "friendly_name_overrides": {},
+      "custom": {
+        "web_socket_url": "ws://192.168.1.200/ws",
+        "reconnect_interval": "5s",
+        "max_reconnect_attempts": 10,
+        "connection_timeout": "10s",
+        "read_timeout": "30s",
+        "write_timeout": "10s",
+        "max_backoff_interval": "5m",
+        "backoff_multiplier": 2.0
+      }
     }
+  }
 }
