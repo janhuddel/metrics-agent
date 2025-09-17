@@ -22,19 +22,19 @@ NC='\033[0m' # No Color
 
 # Logging functions
 log_info() {
-    printf "${BLUE}[INFO]${NC} %s\n" "$1"
+    printf "${BLUE}ℹ️  [INFO]${NC} %s\n" "$1"
 }
 
 log_success() {
-    printf "${GREEN}[SUCCESS]${NC} %s\n" "$1"
+    printf "${GREEN}✅ [SUCCESS]${NC} %s\n" "$1"
 }
 
 log_warning() {
-    printf "${YELLOW}[WARNING]${NC} %s\n" "$1"
+    printf "${YELLOW}⚠️  [WARNING]${NC} %s\n" "$1"
 }
 
 log_error() {
-    printf "${RED}[ERROR]${NC} %s\n" "$1"
+    printf "${RED}❌ [ERROR]${NC} %s\n" "$1"
 }
 
 # Check if running as root
