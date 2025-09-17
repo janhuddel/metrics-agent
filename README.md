@@ -14,13 +14,34 @@ A lightweight metrics collection agent designed to work with Telegraf's `inputs.
 
 ## Installation
 
-### From Source
+### Quick Installation (Recommended)
+
+For production Linux systems, use the automated installation script:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/janhuddel/metrics-agent/main/install.sh | sudo sh
+```
+
+This script will:
+
+- Download the latest release from GitHub
+- Install the binary to `/usr/local/bin/metrics-agent`
+- Create the configuration directory `/etc/metrics-agent`
+- Create the data directory `/var/lib/metrics-agent`
+- Generate a default configuration file with all modules disabled for security
+- Set proper permissions (including telegraf user ownership if available)
+
+### Manual Installation
+
+#### From Source
 
 1. **Prerequisites**:
+
    - Go 1.25 or later
    - Git
 
 2. **Clone and Build**:
+
    ```bash
    git clone https://github.com/janhuddel/metrics-agent.git
    cd metrics-agent
@@ -32,9 +53,46 @@ A lightweight metrics collection agent designed to work with Telegraf's `inputs.
    sudo cp .build/metrics-agent /usr/local/bin/
    ```
 
-### Using Pre-built Binaries
+#### Using Pre-built Binaries
 
 Download the latest release from the [Releases](https://github.com/janhuddel/metrics-agent/releases) page and extract the appropriate binary for your platform.
+
+#### Manual Setup
+
+If you prefer to install manually or the automated script doesn't work for your system:
+
+1. **Download and install the binary**:
+
+   ```bash
+   # Get the latest version
+   VERSION=$(curl -s https://api.github.com/repos/janhuddel/metrics-agent/releases/latest | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
+
+   # Download for your architecture (replace amd64 with your architecture)
+   curl -L -o metrics-agent "https://github.com/janhuddel/metrics-agent/releases/download/$VERSION/metrics-agent-linux-amd64"
+
+   # Make executable and install
+   chmod +x metrics-agent
+   sudo mv metrics-agent /usr/local/bin/
+   ```
+
+2. **Create directories**:
+
+   ```bash
+   sudo mkdir -p /etc/metrics-agent
+   sudo mkdir -p /var/lib/metrics-agent
+   ```
+
+3. **Create configuration file**:
+
+   ```bash
+   sudo cp metrics-agent.example.json /etc/metrics-agent/metrics-agent.json
+   ```
+
+4. **Set permissions** (if telegraf user exists):
+   ```bash
+   sudo chown telegraf:telegraf /var/lib/metrics-agent
+   sudo chmod 755 /var/lib/metrics-agent
+   ```
 
 ## Configuration
 
@@ -122,6 +180,7 @@ The metrics-agent uses an **opt-in security model** where modules are disabled b
 - **Clear logging**: The agent logs which modules are enabled/disabled on startup
 
 **Example startup log:**
+
 ```
 [metrics-agent] Disabled modules: [netatmo]
 [metrics-agent] Starting 1 enabled modules: [tasmota]
@@ -257,14 +316,16 @@ Collects weather and climate data from Netatmo weather stations via the Netatmo 
 #### Setup
 
 1. **Create a Netatmo Developer Account**:
+
    - Go to [https://dev.netatmo.com/](https://dev.netatmo.com/)
    - Create an account and log in
    - Create a new application to get your `client_id` and `client_secret`
    - **Important**: Set the **Redirect URI** to `https://dev.netatmo.com/` (required even for embedded server flow)
 
 2. **Configure the Module**:
-   
+
    For local development:
+
    ```json
    {
      "modules": {
@@ -286,6 +347,7 @@ Collects weather and climate data from Netatmo weather stations via the Netatmo 
    ```
 
    For production deployment (when you need to specify the host IP):
+
    ```json
    {
      "modules": {
@@ -308,6 +370,7 @@ Collects weather and climate data from Netatmo weather stations via the Netatmo 
    ```
 
 3. **Easy Authorization**:
+
    - Start the metrics agent: `./metrics-agent -c metrics-agent.json`
    - The agent will automatically open your browser for authorization
    - Log in to your Netatmo account and authorize the application
@@ -324,6 +387,7 @@ Collects weather and climate data from Netatmo weather stations via the Netatmo 
 The module collects the following metrics from your Netatmo weather station:
 
 **All Devices/Modules**:
+
 - `temperature`: Temperature in Celsius (when available)
 - `humidity`: Humidity percentage (when available)
 - `co2`: CO2 level in ppm (when available, typically indoor stations only)
@@ -377,16 +441,19 @@ Systemd → Telegraf → metrics-agent (inputs.execd) → Modules
 The metrics-agent supports multiple restart mechanisms:
 
 1. **SIGHUP Restart**: Fast module restart without telegraf delay
+
    ```bash
    kill -HUP <pid>
    ```
 
 2. **Process Exit**: Telegraf automatically restarts the process
+
    ```bash
    kill -TERM <pid>
    ```
 
 3. **Telegraf Restart**: Full telegraf service restart
+
    ```bash
    sudo systemctl restart telegraf
    ```
@@ -423,6 +490,7 @@ The demo module includes a panic simulation feature for testing the recovery mec
 ```
 
 This interactive script provides a menu to:
+
 - Trigger panics in the demo module
 - Remove panic triggers
 - Check current status
@@ -430,11 +498,13 @@ This interactive script provides a menu to:
 #### Option B: Manual Commands
 
 **Trigger a panic:**
+
 ```bash
 touch /tmp/metrics-agent-panic-demo
 ```
 
 **Remove panic trigger:**
+
 ```bash
 rm /tmp/metrics-agent-panic-demo
 ```
@@ -458,6 +528,7 @@ rm /tmp/metrics-agent-panic-demo
 #### When restart limit is reached:
 
 After 3 failed restart attempts, you'll see:
+
 ```
 [demo] starting module (attempt 4/4)
 Module execution panic recovered for device demo: Demo module panic triggered by /tmp/metrics-agent-panic-demo file
@@ -465,6 +536,7 @@ Module execution panic recovered for device demo: Demo module panic triggered by
 [demo] module stopped
 [demo] module failed 4 times, exiting program
 ```
+
 The program will then exit gracefully.
 
 ### Cleanup
@@ -480,26 +552,30 @@ rm -f /tmp/metrics-agent-panic-demo
 When running metrics-agent under telegraf (inputs.execd) with systemd management:
 
 ### ✅ **Recommended Configuration:**
+
 ```json
 {
-    "module_restart_limit": 3
+  "module_restart_limit": 3
 }
 ```
 
 **Why this works:**
+
 - **Temporary issues**: Module restarts automatically (resilient)
 - **Persistent issues**: Process exits, telegraf restarts it
 - **Proper failure propagation**: Systemd can monitor telegraf health
 - **No infinite loops**: Prevents resource exhaustion
 
 ### ❌ **Avoid This Configuration:**
+
 ```json
 {
-    "module_restart_limit": 0
+  "module_restart_limit": 0
 }
 ```
 
 **Why this is problematic:**
+
 - Process never exits on persistent module failures
 - Telegraf thinks process is healthy but no metrics are collected
 - Systemd can't detect the underlying issue
