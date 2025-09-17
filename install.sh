@@ -203,7 +203,7 @@ set_permissions() {
     log_info "Setting permissions..."
     
     # Set data directory permissions (telegraf user if it exists, otherwise root)
-    if id "telegraf" &>/dev/null; then
+    if id "telegraf" > /dev/null 2>&1; then
         chown telegraf:telegraf "$DATA_DIR"
         log_info "Set data directory ownership to telegraf:telegraf"
     else
@@ -286,7 +286,7 @@ main() {
     check_root
     
     # Check for required tools
-    if ! command -v curl &> /dev/null; then
+    if ! command -v curl > /dev/null 2>&1; then
         log_error "curl is required but not installed"
         exit 1
     fi
