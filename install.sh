@@ -117,29 +117,21 @@ compare_versions() {
     v1=${v1#v}
     v2=${v2#v}
     
-    # Split versions into arrays
-    IFS='.' read -ra v1_parts <<< "$v1"
-    IFS='.' read -ra v2_parts <<< "$v2"
+    # Convert versions to comparable format by padding with zeros
+    # This ensures 1.2.3 becomes 0001.0002.0003 for proper comparison
+    normalize_version() {
+        echo "$1" | awk -F. '{printf "%04d.%04d.%04d", $1, $2, $3}'
+    }
     
-    # Compare each part
-    for i in "${!v1_parts[@]}"; do
-        if [ -z "${v2_parts[$i]}" ]; then
-            return 0  # v1 is longer, so it's newer
-        fi
-        
-        if [ "${v1_parts[$i]}" -gt "${v2_parts[$i]}" ]; then
-            return 0  # v1 is greater
-        elif [ "${v1_parts[$i]}" -lt "${v2_parts[$i]}" ]; then
-            return 1  # v1 is less
-        fi
-    done
+    v1_normalized=$(normalize_version "$v1")
+    v2_normalized=$(normalize_version "$v2")
     
-    # If we get here, versions are equal or v2 is longer
-    if [ ${#v2_parts[@]} -gt ${#v1_parts[@]} ]; then
-        return 1  # v2 is longer, so it's newer
+    # Use string comparison on normalized versions
+    if [ "$v1_normalized" \> "$v2_normalized" ] || [ "$v1_normalized" = "$v2_normalized" ]; then
+        return 0  # v1 >= v2
+    else
+        return 1  # v1 < v2
     fi
-    
-    return 0  # versions are equal
 }
 
 # Download and install binary
