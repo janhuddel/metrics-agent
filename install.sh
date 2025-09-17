@@ -135,6 +135,7 @@ compare_versions() {
 }
 
 # Download and install binary
+# Returns 0 if binary was already up to date, 1 if installation was performed
 install_binary() {
     version=$1
     os=$2
@@ -149,7 +150,7 @@ install_binary() {
         # Compare versions
         if compare_versions "$current_version" "$version"; then
             log_success "Binary is already up to date (version $current_version)"
-            return 0
+            return 0  # Binary was already up to date
         else
             log_info "Updating from $current_version to $version"
         fi
@@ -198,6 +199,7 @@ install_binary() {
     rm -f "/tmp/$archive_name"
     
     log_success "Binary installed to $INSTALL_DIR/$BINARY_NAME"
+    return 1  # Installation was performed
 }
 
 # Create directories
@@ -377,21 +379,28 @@ main() {
     
     # Install binary
     install_binary "$version" "$os" "$arch"
+    binary_installed=$?
     
-    # Create directories
-    create_directories
-    
-    # Create configuration
-    create_config
-    
-    # Set permissions
-    set_permissions
-    
-    # Verify installation
-    verify_installation
-    
-    # Print instructions
-    print_instructions
+    # Only create directories, config, and set permissions if binary was actually installed
+    if [ $binary_installed -eq 1 ]; then
+        # Create directories
+        create_directories
+        
+        # Create configuration
+        create_config
+        
+        # Set permissions
+        set_permissions
+        
+        # Verify installation
+        verify_installation
+        
+        # Print instructions
+        print_instructions
+    else
+        log_info "Skipping directory creation and configuration setup (binary was already up to date)"
+        log_info "If you need to create directories or configuration, run the script again or create them manually"
+    fi
 }
 
 # Run main function
