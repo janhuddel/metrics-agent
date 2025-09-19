@@ -1,5 +1,1 @@
 .build
-metrics-agent.json
-
-# Development data directory
-.data/

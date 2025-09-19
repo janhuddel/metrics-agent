@@ -2,7 +2,7 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "Debug metrics-agent",
+            "name": "Debug Go Program",
             "type": "go",
             "request": "launch",
             "mode": "debug",
@@ -10,7 +10,7 @@
             "cwd": "${workspaceFolder}",
             "env": {
                 "DEBUG": "1"
-            }        
+            }
         }
     ]
 }
