@@ -1,0 +1,13 @@
+# Development Environment Configuration
+# This file contains development-specific overrides
+
+# Logging configuration
+logging:
+  level: debug
+
+# Sources configuration
+sources:
+  dummy:
+    enabled: true
+    interval: 5s
+ 

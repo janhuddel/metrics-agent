@@ -7,28 +7,40 @@ import (
 	"log/slog"
 	"os"
 	"time"
-
-	"github.com/janhuddel/metrics-agent/internal/sources"
 )
 
-// Source implements a dummy metric source that generates fake temperature data.
-type Source struct{}
+// DummySource implements a dummy metric source that generates fake temperature data.
+type DummySource struct {
+	interval time.Duration
+}
 
-// New creates a new dummy source.
-func New() *Source {
-	return &Source{}
+// New creates a new dummy source with the given configuration.
+func New(config map[string]interface{}) *DummySource {
+	interval := 5 * time.Second // default interval
+
+	if intervalStr, exists := config["interval"]; exists {
+		if intervalStr, ok := intervalStr.(string); ok {
+			if duration, err := time.ParseDuration(intervalStr); err == nil {
+				interval = duration
+			}
+		}
+	}
+
+	return &DummySource{
+		interval: interval,
+	}
 }
 
 // Name returns the name of this source.
-func (s *Source) Name() string {
+func (s *DummySource) Name() string {
 	return "dummy"
 }
 
-// Start begins generating dummy metrics every 5 seconds.
+// Start begins generating dummy metrics at the configured interval.
 // It sends temperature metrics in InfluxDB line protocol format.
-func (s *Source) Start(ctx context.Context, out chan<- string, gracefulShutdown <-chan struct{}, hardShutdown <-chan struct{}) error {
-	// Simplified example: every 5 seconds a measurement
-	ticker := time.NewTicker(5 * time.Second)
+func (s *DummySource) Start(ctx context.Context, out chan<- string, gracefulShutdown <-chan struct{}, hardShutdown <-chan struct{}) error {
+	// Use configured interval for measurements
+	ticker := time.NewTicker(s.interval)
 	defer ticker.Stop()
 
 	// Panic simulation
@@ -63,7 +75,7 @@ func (s *Source) Start(ctx context.Context, out chan<- string, gracefulShutdown 
 }
 
 // watchPanicFile watches for the panic file and sends a signal when found.
-func (s *Source) watchPanicFile(ctx context.Context, panicChan chan<- struct{}) {
+func (s *DummySource) watchPanicFile(ctx context.Context, panicChan chan<- struct{}) {
 	for {
 		select {
 		case <-ctx.Done():
@@ -77,6 +89,3 @@ func (s *Source) watchPanicFile(ctx context.Context, panicChan chan<- struct{}) 
 		}
 	}
 }
-
-// Ensure Source implements the sources.Source interface.
-var _ sources.Source = (*Source)(nil)

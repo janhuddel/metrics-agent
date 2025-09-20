@@ -9,6 +9,8 @@ import (
 	"math"
 	"os"
 	"time"
+
+	"github.com/janhuddel/metrics-agent/internal/types"
 )
 
 // RetryConfig holds configuration for retry logic.
@@ -18,17 +20,11 @@ type RetryConfig struct {
 	MaxDelay   time.Duration // Maximum delay between retries, e.g. 30s
 }
 
-// Source represents a metric source that can be safely executed.
-type Source interface {
-	Name() string
-	Start(ctx context.Context, out chan<- string, gracefulShutdown <-chan struct{}, hardShutdown <-chan struct{}) error
-}
-
 // SafeRun executes a source with retry logic and panic recovery.
 // It will restart the source on failure up to MaxRetries times,
 // then crash the process if all retries are exhausted.
 // The shutdown channels provide centralized shutdown control.
-func SafeRun(ctx context.Context, s Source, out chan<- string, gracefulShutdown <-chan struct{}, hardShutdown <-chan struct{}, cfg RetryConfig) {
+func SafeRun(ctx context.Context, s types.Source, out chan<- string, gracefulShutdown <-chan struct{}, hardShutdown <-chan struct{}, cfg RetryConfig) {
 	var attempt int
 
 	for {

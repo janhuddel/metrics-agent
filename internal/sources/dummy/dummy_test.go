@@ -6,24 +6,21 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/janhuddel/metrics-agent/internal/sources"
 )
 
 // TestNew verifies that New() returns a valid Source instance.
 func TestNew(t *testing.T) {
-	source := New()
+	source := New(map[string]interface{}{})
 	if source == nil {
 		t.Fatal("New() returned nil")
 	}
 
-	// Verify it implements the Source interface
-	var _ sources.Source = source
+	// Note: Interface compliance is checked at compile time
 }
 
 // TestName verifies that the source returns the correct name.
 func TestName(t *testing.T) {
-	source := New()
+	source := New(map[string]interface{}{})
 	expected := "dummy"
 	actual := source.Name()
 
@@ -34,7 +31,7 @@ func TestName(t *testing.T) {
 
 // TestStart verifies that the source generates metrics and handles shutdown signals.
 func TestStart(t *testing.T) {
-	source := New()
+	source := New(map[string]interface{}{})
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
@@ -82,7 +79,7 @@ func TestStart(t *testing.T) {
 
 // TestHardShutdown verifies that hard shutdown works immediately.
 func TestHardShutdown(t *testing.T) {
-	source := New()
+	source := New(map[string]interface{}{})
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
@@ -116,7 +113,7 @@ func TestHardShutdown(t *testing.T) {
 
 // TestPanicFile verifies that the source panics when the panic file exists.
 func TestPanicFile(t *testing.T) {
-	source := New()
+	source := New(map[string]interface{}{})
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
@@ -159,7 +156,7 @@ func TestPanicFile(t *testing.T) {
 
 // TestMetricFormat verifies the exact format of generated metrics.
 func TestMetricFormat(t *testing.T) {
-	source := New()
+	source := New(map[string]interface{}{})
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
@@ -216,7 +213,7 @@ func TestMetricFormat(t *testing.T) {
 
 // TestContextCancellation verifies that context cancellation stops the source.
 func TestContextCancellation(t *testing.T) {
-	source := New()
+	source := New(map[string]interface{}{})
 	ctx, cancel := context.WithCancel(context.Background())
 
 	// Create channels
@@ -257,15 +254,62 @@ func TestContextCancellation(t *testing.T) {
 // BenchmarkSourceCreation benchmarks the creation of a new dummy source.
 func BenchmarkSourceCreation(b *testing.B) {
 	for i := 0; i < b.N; i++ {
-		_ = New()
+		_ = New(map[string]interface{}{})
 	}
 }
 
 // BenchmarkSourceName benchmarks the Name() method.
 func BenchmarkSourceName(b *testing.B) {
-	source := New()
+	source := New(map[string]interface{}{})
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		_ = source.Name()
+	}
+}
+
+// TestConfiguration verifies that the source uses the provided configuration.
+func TestConfiguration(t *testing.T) {
+	// Test with custom interval
+	config := map[string]interface{}{
+		"interval": "2s",
+	}
+	source := New(config)
+
+	// We can't directly test the interval since it's private, but we can test
+	// that the source starts and generates metrics at the expected rate
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	out := make(chan string, 10)
+	gracefulShutdown := make(chan struct{})
+	hardShutdown := make(chan struct{})
+
+	// Start the source in a goroutine
+	errChan := make(chan error, 1)
+	go func() {
+		err := source.Start(ctx, out, gracefulShutdown, hardShutdown)
+		errChan <- err
+	}()
+
+	// Wait for at least one metric
+	select {
+	case metric := <-out:
+		if !strings.Contains(metric, "temperature,source=dummy") {
+			t.Errorf("Expected metric to contain 'temperature,source=dummy', got: %s", metric)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("No metric received within 3 seconds")
+	}
+
+	// Clean shutdown
+	close(gracefulShutdown)
+
+	select {
+	case err := <-errChan:
+		if err != nil {
+			t.Errorf("Expected no error on graceful shutdown, got: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Graceful shutdown did not complete within 2 seconds")
 	}
 }

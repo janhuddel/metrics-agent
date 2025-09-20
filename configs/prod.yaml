@@ -1,0 +1,13 @@
+# Production Environment Configuration
+# This file contains production-specific overrides
+
+# Logging configuration
+logging:
+  level: warn
+
+# Sources configuration
+sources:
+  dummy:
+    enabled: true
+    interval: 30s
+    debug: false

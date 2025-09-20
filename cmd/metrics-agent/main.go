@@ -15,12 +15,19 @@ import (
 
 	"github.com/janhuddel/metrics-agent/internal/runner"
 	"github.com/janhuddel/metrics-agent/internal/sources"
-	"github.com/janhuddel/metrics-agent/internal/sources/dummy"
+	"github.com/janhuddel/metrics-agent/internal/types"
+	"github.com/janhuddel/metrics-agent/internal/utils"
 )
 
 func main() {
-	// Logging auf STDERR
-	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	config, err := utils.LoadConfig()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "unable to load config:", err)
+		os.Exit(1)
+	}
+
+	// Init Logger
+	logger := utils.InitLogger(config)
 	slog.SetDefault(logger)
 
 	// Set up signal handling for graceful vs hard shutdown
@@ -34,14 +41,15 @@ func main() {
 	hardShutdown := make(chan struct{})     // Hard shutdown signal
 
 	retryCfg := runner.RetryConfig{
-		MaxRetries: 3,
-		BaseDelay:  1 * time.Second,
-		MaxDelay:   30 * time.Second,
+		MaxRetries: config.Retry.MaxRetries,
+		BaseDelay:  config.Retry.BaseDelay,
+		MaxDelay:   config.Retry.MaxDelay,
 	}
 
-	// Register sources
-	sourceList := []sources.Source{
-		dummy.New(),
+	enabledSources := sources.CreateSources(config)
+	if len(enabledSources) == 0 {
+		slog.Error("no sources enabled")
+		os.Exit(0)
 	}
 
 	// WaitGroup to track source completion
@@ -49,13 +57,13 @@ func main() {
 	completionChan := make(chan struct{})
 
 	// Start all sources with shutdown channels
-	for _, s := range sourceList {
+	for _, s := range enabledSources {
 		wg.Add(1)
-		go func(source sources.Source) {
+		go func(source types.Source) {
 			defer wg.Done()
 			runner.SafeRun(context.Background(), source, out, gracefulShutdown, hardShutdown, retryCfg)
 		}(s)
-		logger.Info("started source", "name", s.Name())
+		slog.Info("started source", "name", s.Name())
 	}
 
 	// Goroutine to signal completion when all sources finish
@@ -70,22 +78,22 @@ func main() {
 		case sig := <-sigChan:
 			switch sig {
 			case syscall.SIGTERM:
-				logger.Info("received SIGTERM, initiating graceful shutdown")
+				slog.Info("received SIGTERM, initiating graceful shutdown")
 				close(gracefulShutdown)
 
 				// Wait for graceful shutdown with timeout
 				gracefulTimeout := 30 * time.Second
 				select {
 				case <-time.After(gracefulTimeout):
-					logger.Warn("graceful shutdown timeout exceeded, forcing hard shutdown")
+					slog.Warn("graceful shutdown timeout exceeded, forcing hard shutdown")
 					close(hardShutdown)
 					return
 				case <-completionChan:
-					logger.Info("all sources completed gracefully")
+					slog.Info("all sources completed gracefully")
 					return
 				}
 			case syscall.SIGINT:
-				logger.Info("received SIGINT, initiating hard shutdown")
+				slog.Info("received SIGINT, initiating hard shutdown")
 				close(hardShutdown)
 				return
 			}

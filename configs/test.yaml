@@ -1,0 +1,19 @@
+# Test Configuration
+# This file contains test-specific settings
+
+# Logging configuration
+logging:
+  level: debug
+
+# Sources configuration
+sources:
+  dummy:
+    enabled: true
+    interval: 2s
+  tasmota:
+    enabled: true
+    mqtt_host: test-broker
+    mqtt_port: 1883
+    mqtt_username: testuser
+    mqtt_password: testpass
+    interval: 10s
