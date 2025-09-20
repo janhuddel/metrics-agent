@@ -39,13 +39,13 @@ func main() {
 	gracefulShutdown := make(chan struct{}) // Graceful shutdown signal
 	hardShutdown := make(chan struct{})     // Hard shutdown signal
 
-	retryCfg := sources.RetryConfig{
+	retryCfg := types.RetryConfig{
 		MaxRetries: config.Retry.MaxRetries,
 		BaseDelay:  config.Retry.BaseDelay,
 		MaxDelay:   config.Retry.MaxDelay,
 	}
 
-	enabledSources := sources.CreateSources(config)
+	enabledSources := sources.SourceRegistry.GetEnabledSources(config)
 	if len(enabledSources) == 0 {
 		slog.Error("no sources enabled")
 		os.Exit(0)
@@ -60,7 +60,7 @@ func main() {
 		wg.Add(1)
 		go func(source types.Source) {
 			defer wg.Done()
-			sources.SafeRun(context.Background(), source, out, gracefulShutdown, hardShutdown, retryCfg)
+			sources.SourceRegistry.StartSource(context.Background(), source, out, gracefulShutdown, hardShutdown, retryCfg)
 		}(s)
 		slog.Info("started source", "name", s.Name())
 	}

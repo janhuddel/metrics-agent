@@ -3,7 +3,15 @@ package types
 
 import (
 	"context"
+	"time"
 )
+
+// RetryConfig holds configuration for retry logic.
+type RetryConfig struct {
+	MaxRetries int           // Maximum number of retries before crashing
+	BaseDelay  time.Duration // Base delay between retries, e.g. 1s
+	MaxDelay   time.Duration // Maximum delay between retries, e.g. 30s
+}
 
 // Source represents a metric source that can generate metrics.
 type Source interface {
