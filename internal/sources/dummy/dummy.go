@@ -17,7 +17,6 @@ type DummySource struct {
 // New creates a new dummy source with the given configuration.
 func New(config map[string]interface{}) *DummySource {
 	interval := 5 * time.Second // default interval
-
 	if intervalStr, exists := config["interval"]; exists {
 		if intervalStr, ok := intervalStr.(string); ok {
 			if duration, err := time.ParseDuration(intervalStr); err == nil {

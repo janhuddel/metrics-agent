@@ -9,5 +9,5 @@ logging:
 sources:
   dummy:
     enabled: true
-    interval: 5s
+    interval: 1s
  
