@@ -10,9 +10,3 @@ retry:
   max_retries: 3
   base_delay: 1s
   max_delay: 30s
-
-# Sources configuration
-sources:
-  dummy:
-    enabled: false
-    interval: 5s
