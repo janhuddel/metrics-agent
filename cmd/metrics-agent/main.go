@@ -13,7 +13,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/janhuddel/metrics-agent/internal/runner"
 	"github.com/janhuddel/metrics-agent/internal/sources"
 	"github.com/janhuddel/metrics-agent/internal/types"
 	"github.com/janhuddel/metrics-agent/internal/utils"
@@ -40,7 +39,7 @@ func main() {
 	gracefulShutdown := make(chan struct{}) // Graceful shutdown signal
 	hardShutdown := make(chan struct{})     // Hard shutdown signal
 
-	retryCfg := runner.RetryConfig{
+	retryCfg := sources.RetryConfig{
 		MaxRetries: config.Retry.MaxRetries,
 		BaseDelay:  config.Retry.BaseDelay,
 		MaxDelay:   config.Retry.MaxDelay,
@@ -61,7 +60,7 @@ func main() {
 		wg.Add(1)
 		go func(source types.Source) {
 			defer wg.Done()
-			runner.SafeRun(context.Background(), source, out, gracefulShutdown, hardShutdown, retryCfg)
+			sources.SafeRun(context.Background(), source, out, gracefulShutdown, hardShutdown, retryCfg)
 		}(s)
 		slog.Info("started source", "name", s.Name())
 	}

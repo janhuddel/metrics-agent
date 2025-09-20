@@ -1,5 +1,5 @@
 // Package runner provides safe execution and retry logic for metric sources.
-package runner
+package sources
 
 import (
 	"context"
