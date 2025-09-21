@@ -9,17 +9,20 @@ import (
 	"time"
 
 	"github.com/janhuddel/metrics-agent/internal/types"
+	"github.com/janhuddel/metrics-agent/internal/utils"
 )
 
 // DummySource implements a dummy metric source that generates fake temperature data.
 type DummySource struct {
 	interval time.Duration
+	store    *utils.Store
 }
 
 // CreateInstance creates a new DummySource instance with the provided configuration.
 // This function is used by the registry system.
-func CreateInstance(config map[string]interface{}) types.Source {
+func CreateInstance(config map[string]interface{}, store *utils.Store) types.Ingester {
 	interval := 5 * time.Second // default interval
+	store.Set("dummy", "interval", interval)
 
 	// Parse interval from config if provided
 	if intervalStr, ok := config["interval"].(string); ok {
@@ -30,6 +33,7 @@ func CreateInstance(config map[string]interface{}) types.Source {
 
 	return &DummySource{
 		interval: interval,
+		store:    store,
 	}
 }
 

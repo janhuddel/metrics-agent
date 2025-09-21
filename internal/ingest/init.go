@@ -1,6 +1,6 @@
-package sources
+package ingest
 
-import "github.com/janhuddel/metrics-agent/internal/sources/dummy"
+import "github.com/janhuddel/metrics-agent/internal/ingest/dummy"
 
 // SourceRegistry is the global registry instance used throughout the application.
 // It contains all registered metric collection modules.

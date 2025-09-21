@@ -13,8 +13,8 @@ type RetryConfig struct {
 	MaxDelay   time.Duration // Maximum delay between retries, e.g. 30s
 }
 
-// Source represents a metric source that can generate metrics.
-type Source interface {
+// Ingester represents a metric source that can generate metrics.
+type Ingester interface {
 	// Name returns the unique name of this source.
 	Name() string
 
