@@ -5,6 +5,10 @@
 logging:
   level: info
 
+# Storage configuration
+storage:
+  path: ./.data
+
 # Retry configuration
 retry:
   max_retries: 3

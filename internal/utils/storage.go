@@ -51,6 +51,18 @@ func (s *Store) Set(ns string, key string, value any) error {
 	return s.saveNamespace(ns)
 }
 
+// Cleanup removes the entire storage directory and all its contents
+func (s *Store) Cleanup() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	// Clear in-memory data
+	s.data = make(map[string]map[string]any)
+
+	// Remove the storage directory
+	return os.RemoveAll(s.dir)
+}
+
 // --------------------
 // Internal helpers
 // --------------------

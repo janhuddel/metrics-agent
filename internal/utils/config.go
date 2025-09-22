@@ -15,6 +15,9 @@ type AppConfig struct {
 	Logging struct {
 		Level string `koanf:"level"`
 	} `koanf:"logging"`
+	Storage struct {
+		Path string `koanf:"path"`
+	} `koanf:"storage"`
 	Sources map[string]interface{} `koanf:"sources"`
 	Retry   struct {
 		MaxRetries int           `koanf:"max_retries"`

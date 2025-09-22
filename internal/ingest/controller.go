@@ -8,6 +8,7 @@ import (
 	"math"
 	"os"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -15,172 +16,318 @@ import (
 	"github.com/janhuddel/metrics-agent/internal/utils"
 )
 
+// IngesterError represents an error from an ingester with context
+type IngesterError struct {
+	Ingester string
+	Error    error
+	Attempt  int
+}
+
+// Controller manages the lifecycle of metric ingesters and handles graceful/hard shutdowns
 type Controller struct {
 	config    *utils.AppConfig
 	store     *utils.Store
 	ingesters []types.Ingester
+
+	// Shutdown state management
+	shutdownOnce sync.Once
+	shutdownChan chan struct{}
+	hardShutdown int32 // atomic flag for hard shutdown
 }
 
+// NewController creates a new controller instance with proper initialization
 func NewController(config *utils.AppConfig) (*Controller, error) {
-	store := utils.NewStore("./.data")
+	store := utils.NewStore(config.Storage.Path)
 	ingesters := getEnabledSources(config, store)
 	if len(ingesters) == 0 {
 		return nil, errors.New("no sources enabled")
 	}
 
+	slog.Info("controller initialized", "ingester_count", len(ingesters))
 	return &Controller{
-		config:    config,
-		ingesters: ingesters,
-		store:     store,
+		config:       config,
+		ingesters:    ingesters,
+		store:        store,
+		shutdownChan: make(chan struct{}),
 	}, nil
 }
 
-func (c *Controller) Start(sigChan chan os.Signal) {
-	// Shared channels
-	metricChan := make(chan *types.Metric, 100) // Channel for structured metrics
-	errs := make(chan error, 10)
-	gracefulShutdown := make(chan struct{}) // Graceful shutdown signal
-	hardShutdown := make(chan struct{})     // Hard shutdown signal
+// Start begins the controller operation with proper signal handling and error management
+func (c *Controller) Start(ctx context.Context, sigChan <-chan os.Signal) error {
+	slog.Info("starting controller")
 
-	// Get retry configuration from config
-	retryCfg := types.RetryConfig{
-		MaxRetries: c.config.Retry.MaxRetries,
-		BaseDelay:  c.config.Retry.BaseDelay,
-		MaxDelay:   c.config.Retry.MaxDelay,
-	}
+	// Create context with cancellation for ingesters
+	ingesterCtx, ingesterCancel := context.WithCancel(ctx)
+	defer ingesterCancel()
 
-	// Start the metric writer
+	// Create channels for communication
+	metricChan := make(chan *types.Metric, 100)
+	errorChan := make(chan IngesterError, len(c.ingesters)*2) // Buffer for errors
+
+	// Start metric writer
 	metricWriter := utils.NewLineProtocolWriter()
+	writerCtx, writerCancel := context.WithCancel(ctx)
+	defer writerCancel()
+
 	writerDone := make(chan struct{})
 	go func() {
 		defer close(writerDone)
-		metricWriter.Start(context.Background(), metricChan)
+		metricWriter.Start(writerCtx, metricChan)
 	}()
 
+	// Start all ingesters with proper error handling
 	var wg sync.WaitGroup
-	completionChan := make(chan struct{})
+	ingesterDone := make(chan struct{})
 
-	// Start all sources with shutdown channels
 	for _, ingester := range c.ingesters {
 		wg.Add(1)
-		go func(source types.Ingester) {
+		go func(ing types.Ingester) {
 			defer wg.Done()
-			c.startIngester(context.Background(), ingester, metricChan, gracefulShutdown, hardShutdown, retryCfg)
+			c.runIngester(ingesterCtx, ing, metricChan, errorChan)
 		}(ingester)
 		slog.Info("started ingester", "name", ingester.Name())
 	}
 
-	// Goroutine to signal completion when all sources finish
+	// Monitor ingester completion
 	go func() {
 		wg.Wait()
-		close(completionChan)
+		close(ingesterDone)
 	}()
 
-	// Main loop: signal handling and error processing
+	// Main event loop
+	return c.eventLoop(ctx, sigChan, metricWriter, metricChan, errorChan, ingesterDone, writerDone)
+}
+
+// eventLoop handles signals, errors, and shutdown coordination
+func (c *Controller) eventLoop(
+	ctx context.Context,
+	sigChan <-chan os.Signal,
+	metricWriter utils.MetricWriter,
+	metricChan chan *types.Metric,
+	errorChan chan IngesterError,
+	ingesterDone chan struct{},
+	writerDone chan struct{},
+) error {
+
+	gracefulTimeout := 30 * time.Second
+
 	for {
 		select {
 		case sig := <-sigChan:
 			switch sig {
 			case syscall.SIGTERM:
 				slog.Info("received SIGTERM, initiating graceful shutdown")
-				close(gracefulShutdown)
-
-				// Wait for graceful shutdown with timeout
-				gracefulTimeout := 30 * time.Second
-				select {
-				case <-time.After(gracefulTimeout):
-					slog.Warn("graceful shutdown timeout exceeded, forcing hard shutdown")
-					close(hardShutdown)
-					// Stop the writer immediately for hard shutdown
-					metricWriter.Stop()
-					// Wait for writer to complete
-					<-writerDone
-					return
-				case <-completionChan:
-					slog.Info("all sources completed gracefully")
-					// Drain remaining metrics before stopping the writer
-					metricWriter.Drain(metricChan)
-					metricWriter.Stop()
-					// Wait for writer to complete
-					<-writerDone
-					return
-				}
+				return c.handleGracefulShutdown(metricWriter, metricChan, ingesterDone, writerDone, gracefulTimeout)
 			case syscall.SIGINT:
 				slog.Info("received SIGINT, initiating hard shutdown")
-				close(hardShutdown)
-				// Stop the writer immediately for hard shutdown
-				metricWriter.Stop()
-				// Wait for writer to complete
-				<-writerDone
-				return
+				return c.handleHardShutdown(metricWriter, writerDone)
 			}
-		case err := <-errs:
-			slog.Error("source error", "err", err)
+
+		case err := <-errorChan:
+			if err := c.handleIngesterError(err); err != nil {
+				slog.Error("critical ingester error, initiating shutdown", "error", err)
+				return c.handleHardShutdown(metricWriter, writerDone)
+			}
+
+		case <-ingesterDone:
+			slog.Info("all ingesters completed")
+			return c.handleGracefulShutdown(metricWriter, metricChan, ingesterDone, writerDone, 0)
+
+		case <-ctx.Done():
+			slog.Info("context cancelled, initiating shutdown")
+			return c.handleHardShutdown(metricWriter, writerDone)
 		}
 	}
 }
 
-func (c *Controller) startIngester(
+// runIngester runs a single ingester with retry logic and error reporting
+func (c *Controller) runIngester(
 	ctx context.Context,
 	ingester types.Ingester,
-	out chan<- *types.Metric,
-	gracefulShutdown <-chan struct{},
-	hardShutdown <-chan struct{},
-	cfg types.RetryConfig) {
+	metricChan chan<- *types.Metric,
+	errorChan chan<- IngesterError,
+) {
+	retryCfg := types.RetryConfig{
+		MaxRetries: c.config.Retry.MaxRetries,
+		BaseDelay:  c.config.Retry.BaseDelay,
+		MaxDelay:   c.config.Retry.MaxDelay,
+	}
 
 	var attempt int
 
 	for {
-		// Panic protection
-		err := func() (err error) {
-			defer func() {
-				if r := recover(); r != nil {
-					err = fmt.Errorf("panic in %s: %v", ingester.Name(), r)
-				}
-			}()
-			return ingester.Start(ctx, out, gracefulShutdown, hardShutdown)
-		}()
-
-		// Normal exit due to context cancellation
-		if errors.Is(err, context.Canceled) || ctx.Err() != nil {
-			slog.Info("stopping source (context canceled)", "name", ingester.Name())
+		// Check for shutdown before starting
+		if atomic.LoadInt32(&c.hardShutdown) == 1 {
+			slog.Info("hard shutdown in progress, stopping ingester", "name", ingester.Name())
 			return
 		}
 
-		// Successful graceful shutdown (source returned nil)
+		// Run ingester with panic protection
+		err := c.runIngesterWithPanicProtection(ctx, ingester, metricChan)
+
+		// Handle different exit conditions
 		if err == nil {
-			slog.Info("source completed gracefully", "name", ingester.Name())
+			slog.Info("ingester completed successfully", "name", ingester.Name())
 			return
 		}
 
-		// Error case → Retry
+		if errors.Is(err, context.Canceled) || ctx.Err() != nil {
+			slog.Info("ingester stopped due to context cancellation", "name", ingester.Name())
+			return
+		}
+
+		// Handle retry logic
 		attempt++
-		if attempt > cfg.MaxRetries {
-			slog.Error("source retries exhausted, crashing",
-				"name", ingester.Name(), "err", err)
-			os.Exit(1) // Crash → Control back to Telegraf
+		if attempt > retryCfg.MaxRetries {
+			slog.Error("ingester retries exhausted", "name", ingester.Name(), "attempts", attempt)
+			errorChan <- IngesterError{
+				Ingester: ingester.Name(),
+				Error:    fmt.Errorf("retries exhausted after %d attempts: %w", attempt, err),
+				Attempt:  attempt,
+			}
+			return
 		}
 
-		// Calculate backoff
-		backoff := cfg.BaseDelay * time.Duration(math.Pow(2, float64(attempt-1)))
-		if backoff > cfg.MaxDelay {
-			backoff = cfg.MaxDelay
+		// Report error and wait for retry
+		errorChan <- IngesterError{
+			Ingester: ingester.Name(),
+			Error:    err,
+			Attempt:  attempt,
 		}
 
-		slog.Warn("source failed, will retry",
-			"name", ingester.Name(), "attempt", attempt, "err", err, "backoff", backoff)
+		// Calculate backoff with jitter
+		backoff := c.calculateBackoff(attempt, retryCfg)
 
+		slog.Warn("ingester failed, retrying",
+			"name", ingester.Name(),
+			"attempt", attempt,
+			"error", err,
+			"backoff", backoff)
+
+		// Wait for backoff or shutdown
 		select {
 		case <-time.After(backoff):
 			// Continue retry loop
-		case <-gracefulShutdown:
-			slog.Info("stopping source during backoff (graceful shutdown)", "name", ingester.Name())
-			return
-		case <-hardShutdown:
-			slog.Info("stopping source during backoff (hard shutdown)", "name", ingester.Name())
+		case <-ctx.Done():
+			slog.Info("context cancelled during backoff", "name", ingester.Name())
 			return
 		}
 	}
+}
+
+// runIngesterWithPanicProtection runs an ingester with panic recovery
+func (c *Controller) runIngesterWithPanicProtection(
+	ctx context.Context,
+	ingester types.Ingester,
+	metricChan chan<- *types.Metric,
+) (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("panic in ingester %s: %v", ingester.Name(), r)
+		}
+	}()
+
+	// Create shutdown channels for this ingester
+	gracefulShutdown := make(chan struct{})
+	hardShutdown := make(chan struct{})
+
+	// Monitor shutdown state
+	go func() {
+		select {
+		case <-c.shutdownChan:
+			close(gracefulShutdown)
+		case <-ctx.Done():
+			close(hardShutdown)
+		}
+	}()
+
+	return ingester.Start(ctx, metricChan, gracefulShutdown, hardShutdown)
+}
+
+// handleIngesterError processes errors from ingesters
+func (c *Controller) handleIngesterError(err IngesterError) error {
+	slog.Warn("ingester error",
+		"ingester", err.Ingester,
+		"attempt", err.Attempt,
+		"error", err.Error)
+
+	// For now, we just log errors. In the future, we could implement
+	// more sophisticated error handling (e.g., circuit breakers)
+	return nil
+}
+
+// handleGracefulShutdown performs graceful shutdown with timeout
+func (c *Controller) handleGracefulShutdown(
+	metricWriter utils.MetricWriter,
+	metricChan chan *types.Metric,
+	ingesterDone chan struct{},
+	writerDone chan struct{},
+	timeout time.Duration,
+) error {
+	slog.Info("initiating graceful shutdown")
+
+	// Signal graceful shutdown to all ingesters
+	c.shutdownOnce.Do(func() {
+		close(c.shutdownChan)
+	})
+
+	// Wait for ingesters to complete or timeout
+	if timeout > 0 {
+		select {
+		case <-ingesterDone:
+			slog.Info("all ingesters completed gracefully")
+		case <-time.After(timeout):
+			slog.Warn("graceful shutdown timeout exceeded, forcing hard shutdown")
+			atomic.StoreInt32(&c.hardShutdown, 1)
+		}
+	} else {
+		<-ingesterDone
+	}
+
+	// Drain remaining metrics
+	metricWriter.Drain(metricChan)
+
+	// Stop writer and wait for completion
+	metricWriter.Stop()
+	<-writerDone
+
+	slog.Info("graceful shutdown completed")
+	return nil
+}
+
+// handleHardShutdown performs immediate shutdown
+func (c *Controller) handleHardShutdown(
+	metricWriter utils.MetricWriter,
+	writerDone chan struct{},
+) error {
+	slog.Info("initiating hard shutdown")
+
+	// Signal hard shutdown immediately
+	atomic.StoreInt32(&c.hardShutdown, 1)
+
+	// Stop writer immediately
+	metricWriter.Stop()
+	<-writerDone
+
+	slog.Info("hard shutdown completed")
+	return nil
+}
+
+// calculateBackoff calculates exponential backoff with jitter
+func (c *Controller) calculateBackoff(attempt int, cfg types.RetryConfig) time.Duration {
+	// Exponential backoff: baseDelay * 2^(attempt-1)
+	backoff := cfg.BaseDelay * time.Duration(math.Pow(2, float64(attempt-1)))
+
+	// Cap at max delay
+	if backoff > cfg.MaxDelay {
+		backoff = cfg.MaxDelay
+	}
+
+	// Add jitter (±25% of the backoff time)
+	jitter := time.Duration(float64(backoff) * 0.25)
+	jitterOffset := time.Duration(float64(jitter) * (2*math.Pi*float64(time.Now().UnixNano()%1000)/1000 - 1))
+
+	return backoff + jitterOffset
 }
 
 // Initialize creates a list of ingesters from the registered sources

@@ -1,6 +1,7 @@
 package ingest
 
 import (
+	"context"
 	"os"
 	"sync"
 	"syscall"
@@ -10,6 +11,88 @@ import (
 	"github.com/janhuddel/metrics-agent/internal/types"
 	"github.com/janhuddel/metrics-agent/internal/utils"
 )
+
+// createTestConfig creates a test configuration with a temporary storage directory
+func createTestConfig(t *testing.T) (*utils.AppConfig, func()) {
+	// Create a temporary directory for storage
+	tempDir, err := os.MkdirTemp("", "metrics-agent-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+
+	config := &utils.AppConfig{
+		Storage: struct {
+			Path string `koanf:"path"`
+		}{
+			Path: tempDir,
+		},
+		Sources: map[string]interface{}{
+			"mock": map[string]interface{}{
+				"enabled": true,
+				"name":    "test_mock",
+			},
+		},
+		Retry: struct {
+			MaxRetries int           `koanf:"max_retries"`
+			BaseDelay  time.Duration `koanf:"base_delay"`
+			MaxDelay   time.Duration `koanf:"max_delay"`
+		}{
+			MaxRetries: 3,
+			BaseDelay:  time.Second,
+			MaxDelay:   30 * time.Second,
+		},
+	}
+
+	// Return cleanup function
+	cleanup := func() {
+		os.RemoveAll(tempDir)
+	}
+
+	return config, cleanup
+}
+
+// createTestConfigWithMultipleSources creates a test configuration with multiple mock sources
+func createTestConfigWithMultipleSources(t *testing.T) (*utils.AppConfig, func()) {
+	// Create a temporary directory for storage
+	tempDir, err := os.MkdirTemp("", "metrics-agent-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+
+	config := &utils.AppConfig{
+		Storage: struct {
+			Path string `koanf:"path"`
+		}{
+			Path: tempDir,
+		},
+		Sources: map[string]interface{}{
+			"mock1": map[string]interface{}{
+				"enabled": true,
+				"name":    "test_mock_1",
+			},
+			"mock2": map[string]interface{}{
+				"enabled": true,
+				"name":    "test_mock_2",
+			},
+		},
+		Retry: struct {
+			MaxRetries int           `koanf:"max_retries"`
+			BaseDelay  time.Duration `koanf:"base_delay"`
+			MaxDelay   time.Duration `koanf:"max_delay"`
+		}{
+			MaxRetries: 3,
+			BaseDelay:  time.Second,
+			MaxDelay:   30 * time.Second,
+		},
+	}
+
+	// Return cleanup function
+	cleanup := func() {
+		os.RemoveAll(tempDir)
+	}
+
+	return config, cleanup
+}
 
 // TestNewController tests the controller creation with different configurations
 func TestNewController(t *testing.T) {
@@ -94,7 +177,17 @@ func TestNewController(t *testing.T) {
 				SourceRegistry = originalRegistry
 			}()
 
-			controller, err := NewController(tt.config)
+			// Use test config with temporary storage for valid configs
+			var config *utils.AppConfig
+			var cleanup func()
+			if !tt.expectError {
+				config, cleanup = createTestConfig(t)
+				defer cleanup()
+			} else {
+				config = tt.config
+			}
+
+			controller, err := NewController(config)
 
 			if tt.expectError {
 				if err == nil {
@@ -109,8 +202,9 @@ func TestNewController(t *testing.T) {
 				}
 				if controller == nil {
 					t.Error("Expected controller to be created successfully")
+					return
 				}
-				if controller.config != tt.config {
+				if controller.config != config {
 					t.Error("Controller config not set correctly")
 				}
 				if controller.store == nil {
@@ -119,6 +213,10 @@ func TestNewController(t *testing.T) {
 				if len(controller.ingesters) == 0 {
 					t.Error("Expected at least one ingester to be created")
 				}
+				// Clean up the store directory
+				if controller.store != nil {
+					controller.store.Cleanup()
+				}
 			}
 		})
 	}
@@ -126,24 +224,9 @@ func TestNewController(t *testing.T) {
 
 // TestControllerStart_SIGTERM tests graceful shutdown with SIGTERM signal
 func TestControllerStart_SIGTERM(t *testing.T) {
-	// Create test configuration
-	config := &utils.AppConfig{
-		Sources: map[string]interface{}{
-			"mock": map[string]interface{}{
-				"enabled": true,
-				"name":    "test_mock",
-			},
-		},
-		Retry: struct {
-			MaxRetries int           `koanf:"max_retries"`
-			BaseDelay  time.Duration `koanf:"base_delay"`
-			MaxDelay   time.Duration `koanf:"max_delay"`
-		}{
-			MaxRetries: 3,
-			BaseDelay:  time.Second,
-			MaxDelay:   30 * time.Second,
-		},
-	}
+	// Create test configuration with temporary storage
+	config, cleanup := createTestConfig(t)
+	defer cleanup()
 
 	// Register mock ingester
 	registry := NewRegistry()
@@ -169,7 +252,7 @@ func TestControllerStart_SIGTERM(t *testing.T) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		controller.Start(sigChan)
+		controller.Start(context.Background(), sigChan)
 	}()
 
 	// Wait a bit for controller to start
@@ -188,6 +271,10 @@ func TestControllerStart_SIGTERM(t *testing.T) {
 	select {
 	case <-done:
 		// Controller finished successfully
+		// Clean up the store directory
+		if controller.store != nil {
+			controller.store.Cleanup()
+		}
 	case <-time.After(5 * time.Second):
 		t.Error("Controller did not finish within timeout")
 	}
@@ -195,24 +282,9 @@ func TestControllerStart_SIGTERM(t *testing.T) {
 
 // TestControllerStart_SIGINT tests hard shutdown with SIGINT signal
 func TestControllerStart_SIGINT(t *testing.T) {
-	// Create test configuration
-	config := &utils.AppConfig{
-		Sources: map[string]interface{}{
-			"mock": map[string]interface{}{
-				"enabled": true,
-				"name":    "test_mock",
-			},
-		},
-		Retry: struct {
-			MaxRetries int           `koanf:"max_retries"`
-			BaseDelay  time.Duration `koanf:"base_delay"`
-			MaxDelay   time.Duration `koanf:"max_delay"`
-		}{
-			MaxRetries: 3,
-			BaseDelay:  time.Second,
-			MaxDelay:   30 * time.Second,
-		},
-	}
+	// Create test configuration with temporary storage
+	config, cleanup := createTestConfig(t)
+	defer cleanup()
 
 	// Register mock ingester
 	registry := NewRegistry()
@@ -238,7 +310,7 @@ func TestControllerStart_SIGINT(t *testing.T) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		controller.Start(sigChan)
+		controller.Start(context.Background(), sigChan)
 	}()
 
 	// Wait a bit for controller to start
@@ -257,6 +329,10 @@ func TestControllerStart_SIGINT(t *testing.T) {
 	select {
 	case <-done:
 		// Controller finished successfully
+		// Clean up the store directory
+		if controller.store != nil {
+			controller.store.Cleanup()
+		}
 	case <-time.After(5 * time.Second):
 		t.Error("Controller did not finish within timeout")
 	}
@@ -264,24 +340,14 @@ func TestControllerStart_SIGINT(t *testing.T) {
 
 // TestControllerStart_IngesterRetry tests ingester retry logic
 func TestControllerStart_IngesterRetry(t *testing.T) {
-	// Create test configuration with low retry settings
-	config := &utils.AppConfig{
-		Sources: map[string]interface{}{
-			"mock": map[string]interface{}{
-				"enabled": true,
-				"name":    "test_mock",
-			},
-		},
-		Retry: struct {
-			MaxRetries int           `koanf:"max_retries"`
-			BaseDelay  time.Duration `koanf:"base_delay"`
-			MaxDelay   time.Duration `koanf:"max_delay"`
-		}{
-			MaxRetries: 2,
-			BaseDelay:  50 * time.Millisecond,
-			MaxDelay:   200 * time.Millisecond,
-		},
-	}
+	// Create test configuration with temporary storage and low retry settings
+	config, cleanup := createTestConfig(t)
+	defer cleanup()
+
+	// Override retry settings for this test
+	config.Retry.MaxRetries = 2
+	config.Retry.BaseDelay = 50 * time.Millisecond
+	config.Retry.MaxDelay = 200 * time.Millisecond
 
 	// Create a mock ingester that will error after a short time
 	mockIngester := NewMockIngester("test_mock").WithError(100 * time.Millisecond)
@@ -312,7 +378,7 @@ func TestControllerStart_IngesterRetry(t *testing.T) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		controller.Start(sigChan)
+		controller.Start(context.Background(), sigChan)
 	}()
 
 	// Wait for one retry to happen, then stop before exhaustion
@@ -331,6 +397,10 @@ func TestControllerStart_IngesterRetry(t *testing.T) {
 	select {
 	case <-done:
 		// Controller finished successfully
+		// Clean up the store directory
+		if controller.store != nil {
+			controller.store.Cleanup()
+		}
 	case <-time.After(5 * time.Second):
 		t.Error("Controller did not finish within timeout")
 	}
@@ -338,24 +408,14 @@ func TestControllerStart_IngesterRetry(t *testing.T) {
 
 // TestControllerStart_IngesterPanic tests panic recovery in ingester
 func TestControllerStart_IngesterPanic(t *testing.T) {
-	// Create test configuration
-	config := &utils.AppConfig{
-		Sources: map[string]interface{}{
-			"mock": map[string]interface{}{
-				"enabled": true,
-				"name":    "test_mock",
-			},
-		},
-		Retry: struct {
-			MaxRetries int           `koanf:"max_retries"`
-			BaseDelay  time.Duration `koanf:"base_delay"`
-			MaxDelay   time.Duration `koanf:"max_delay"`
-		}{
-			MaxRetries: 2,
-			BaseDelay:  50 * time.Millisecond,
-			MaxDelay:   200 * time.Millisecond,
-		},
-	}
+	// Create test configuration with temporary storage
+	config, cleanup := createTestConfig(t)
+	defer cleanup()
+
+	// Override retry settings for this test
+	config.Retry.MaxRetries = 2
+	config.Retry.BaseDelay = 50 * time.Millisecond
+	config.Retry.MaxDelay = 200 * time.Millisecond
 
 	// Create a mock ingester that will panic after a short time
 	mockIngester := NewMockIngester("test_mock").WithPanic(100 * time.Millisecond)
@@ -386,7 +446,7 @@ func TestControllerStart_IngesterPanic(t *testing.T) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		controller.Start(sigChan)
+		controller.Start(context.Background(), sigChan)
 	}()
 
 	// Wait for panic and one retry to happen, then stop before exhaustion
@@ -405,6 +465,10 @@ func TestControllerStart_IngesterPanic(t *testing.T) {
 	select {
 	case <-done:
 		// Controller finished successfully
+		// Clean up the store directory
+		if controller.store != nil {
+			controller.store.Cleanup()
+		}
 	case <-time.After(5 * time.Second):
 		t.Error("Controller did not finish within timeout")
 	}
@@ -412,24 +476,9 @@ func TestControllerStart_IngesterPanic(t *testing.T) {
 
 // TestControllerStart_GracefulShutdownTimeout tests graceful shutdown timeout
 func TestControllerStart_GracefulShutdownTimeout(t *testing.T) {
-	// Create test configuration
-	config := &utils.AppConfig{
-		Sources: map[string]interface{}{
-			"mock": map[string]interface{}{
-				"enabled": true,
-				"name":    "test_mock",
-			},
-		},
-		Retry: struct {
-			MaxRetries int           `koanf:"max_retries"`
-			BaseDelay  time.Duration `koanf:"base_delay"`
-			MaxDelay   time.Duration `koanf:"max_delay"`
-		}{
-			MaxRetries: 3,
-			BaseDelay:  time.Second,
-			MaxDelay:   30 * time.Second,
-		},
-	}
+	// Create test configuration with temporary storage
+	config, cleanup := createTestConfig(t)
+	defer cleanup()
 
 	// Create a mock ingester with long cleanup time to trigger timeout
 	mockIngester := NewMockIngester("test_mock").WithCleanupTime(35 * time.Second)
@@ -460,7 +509,7 @@ func TestControllerStart_GracefulShutdownTimeout(t *testing.T) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		controller.Start(sigChan)
+		controller.Start(context.Background(), sigChan)
 	}()
 
 	// Wait a bit for controller to start
@@ -479,6 +528,10 @@ func TestControllerStart_GracefulShutdownTimeout(t *testing.T) {
 	select {
 	case <-done:
 		// Controller finished successfully
+		// Clean up the store directory
+		if controller.store != nil {
+			controller.store.Cleanup()
+		}
 	case <-time.After(40 * time.Second):
 		t.Error("Controller did not finish within timeout")
 	}
@@ -486,28 +539,9 @@ func TestControllerStart_GracefulShutdownTimeout(t *testing.T) {
 
 // TestControllerStart_ConcurrentIngesters tests multiple ingesters running concurrently
 func TestControllerStart_ConcurrentIngesters(t *testing.T) {
-	// Create test configuration with multiple ingesters
-	config := &utils.AppConfig{
-		Sources: map[string]interface{}{
-			"mock1": map[string]interface{}{
-				"enabled": true,
-				"name":    "test_mock_1",
-			},
-			"mock2": map[string]interface{}{
-				"enabled": true,
-				"name":    "test_mock_2",
-			},
-		},
-		Retry: struct {
-			MaxRetries int           `koanf:"max_retries"`
-			BaseDelay  time.Duration `koanf:"base_delay"`
-			MaxDelay   time.Duration `koanf:"max_delay"`
-		}{
-			MaxRetries: 3,
-			BaseDelay:  time.Second,
-			MaxDelay:   30 * time.Second,
-		},
-	}
+	// Create test configuration with multiple ingesters and temporary storage
+	config, cleanup := createTestConfigWithMultipleSources(t)
+	defer cleanup()
 
 	// Create mock ingesters
 	mockIngester1 := NewMockIngester("test_mock_1").WithMetrics(5, 50*time.Millisecond)
@@ -542,7 +576,7 @@ func TestControllerStart_ConcurrentIngesters(t *testing.T) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		controller.Start(sigChan)
+		controller.Start(context.Background(), sigChan)
 	}()
 
 	// Wait for ingesters to send some metrics
@@ -575,6 +609,10 @@ func TestControllerStart_ConcurrentIngesters(t *testing.T) {
 		if mockIngester2.MetricsSent() == 0 {
 			t.Error("Mock ingester 2 did not send any metrics")
 		}
+		// Clean up the store directory
+		if controller.store != nil {
+			controller.store.Cleanup()
+		}
 	case <-time.After(5 * time.Second):
 		t.Error("Controller did not finish within timeout")
 	}
@@ -582,24 +620,9 @@ func TestControllerStart_ConcurrentIngesters(t *testing.T) {
 
 // TestControllerStart_MetricChannel tests that metrics are properly sent through the channel
 func TestControllerStart_MetricChannel(t *testing.T) {
-	// Create test configuration
-	config := &utils.AppConfig{
-		Sources: map[string]interface{}{
-			"mock": map[string]interface{}{
-				"enabled": true,
-				"name":    "test_mock",
-			},
-		},
-		Retry: struct {
-			MaxRetries int           `koanf:"max_retries"`
-			BaseDelay  time.Duration `koanf:"base_delay"`
-			MaxDelay   time.Duration `koanf:"max_delay"`
-		}{
-			MaxRetries: 3,
-			BaseDelay:  time.Second,
-			MaxDelay:   30 * time.Second,
-		},
-	}
+	// Create test configuration with temporary storage
+	config, cleanup := createTestConfig(t)
+	defer cleanup()
 
 	// Create a mock ingester that sends a specific number of metrics
 	mockIngester := NewMockIngester("test_mock").WithMetrics(3, 100*time.Millisecond)
@@ -630,7 +653,7 @@ func TestControllerStart_MetricChannel(t *testing.T) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		controller.Start(sigChan)
+		controller.Start(context.Background(), sigChan)
 	}()
 
 	// Wait for metrics to be sent
@@ -651,6 +674,10 @@ func TestControllerStart_MetricChannel(t *testing.T) {
 		// Verify metrics were sent
 		if mockIngester.MetricsSent() == 0 {
 			t.Error("No metrics were sent")
+		}
+		// Clean up the store directory
+		if controller.store != nil {
+			controller.store.Cleanup()
 		}
 	case <-time.After(5 * time.Second):
 		t.Error("Controller did not finish within timeout")
@@ -677,8 +704,15 @@ func TestGetEnabledSources(t *testing.T) {
 		},
 	}
 
+	// Create temporary directory for test storage
+	tempDir, err := os.MkdirTemp("", "metrics-agent-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tempDir)
+
 	// Create mock store
-	store := utils.NewStore("./.test_data")
+	store := utils.NewStore(tempDir)
 
 	// Register mock ingesters
 	registry := NewRegistry()
@@ -715,28 +749,16 @@ func TestGetEnabledSources(t *testing.T) {
 	if names["test_mock_2"] {
 		t.Error("Expected mock2 ingester to be disabled")
 	}
+
+	// Clean up the store directory
+	store.Cleanup()
 }
 
 // TestControllerStart_ContextCancellation tests context cancellation handling
 func TestControllerStart_ContextCancellation(t *testing.T) {
-	// Create test configuration
-	config := &utils.AppConfig{
-		Sources: map[string]interface{}{
-			"mock": map[string]interface{}{
-				"enabled": true,
-				"name":    "test_mock",
-			},
-		},
-		Retry: struct {
-			MaxRetries int           `koanf:"max_retries"`
-			BaseDelay  time.Duration `koanf:"base_delay"`
-			MaxDelay   time.Duration `koanf:"max_delay"`
-		}{
-			MaxRetries: 3,
-			BaseDelay:  time.Second,
-			MaxDelay:   30 * time.Second,
-		},
-	}
+	// Create test configuration with temporary storage
+	config, cleanup := createTestConfig(t)
+	defer cleanup()
 
 	// Create a mock ingester that respects context cancellation
 	mockIngester := NewMockIngester("test_mock").WithMetrics(10, 50*time.Millisecond)
@@ -767,7 +789,7 @@ func TestControllerStart_ContextCancellation(t *testing.T) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		controller.Start(sigChan)
+		controller.Start(context.Background(), sigChan)
 	}()
 
 	// Wait a bit for controller to start
@@ -786,6 +808,10 @@ func TestControllerStart_ContextCancellation(t *testing.T) {
 	select {
 	case <-done:
 		// Controller finished successfully
+		// Clean up the store directory
+		if controller.store != nil {
+			controller.store.Cleanup()
+		}
 	case <-time.After(5 * time.Second):
 		t.Error("Controller did not finish within timeout")
 	}
@@ -793,7 +819,19 @@ func TestControllerStart_ContextCancellation(t *testing.T) {
 
 // BenchmarkControllerStart benchmarks the controller start performance
 func BenchmarkControllerStart(b *testing.B) {
+	// Create temporary directory for benchmark storage
+	tempDir, err := os.MkdirTemp("", "metrics-agent-bench-*")
+	if err != nil {
+		b.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tempDir)
+
 	config := &utils.AppConfig{
+		Storage: struct {
+			Path string `koanf:"path"`
+		}{
+			Path: tempDir,
+		},
 		Sources: map[string]interface{}{
 			"mock": map[string]interface{}{
 				"enabled": true,
@@ -830,6 +868,11 @@ func BenchmarkControllerStart(b *testing.B) {
 		}
 		if controller == nil {
 			b.Error("Controller is nil")
+			continue
+		}
+		// Clean up the store directory for each iteration
+		if controller.store != nil {
+			controller.store.Cleanup()
 		}
 	}
 }
