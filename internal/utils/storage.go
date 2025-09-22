@@ -11,13 +11,17 @@ type Store struct {
 	mu   sync.RWMutex
 	data map[string]map[string]any
 	dir  string
+	// onceMap tracks which namespaces have been loaded to prevent race conditions
+	onceMap map[string]*sync.Once
+	onceMu  sync.Mutex
 }
 
 func NewStore(dir string) *Store {
 	_ = os.MkdirAll(dir, 0o755)
 	return &Store{
-		data: make(map[string]map[string]any),
-		dir:  dir,
+		data:    make(map[string]map[string]any),
+		dir:     dir,
+		onceMap: make(map[string]*sync.Once),
 	}
 }
 
@@ -59,6 +63,11 @@ func (s *Store) Cleanup() error {
 	// Clear in-memory data
 	s.data = make(map[string]map[string]any)
 
+	// Clear the once map
+	s.onceMu.Lock()
+	s.onceMap = make(map[string]*sync.Once)
+	s.onceMu.Unlock()
+
 	// Remove the storage directory
 	return os.RemoveAll(s.dir)
 }
@@ -69,6 +78,7 @@ func (s *Store) Cleanup() error {
 
 // ensureNamespaceLoaded sorgt dafür, dass ein Namespace einmalig von Disk geladen wird
 func (s *Store) ensureNamespaceLoaded(ns string) {
+	// First, try to get a read lock to check if namespace is already loaded
 	s.mu.RLock()
 	_, ok := s.data[ns]
 	s.mu.RUnlock()
@@ -76,19 +86,29 @@ func (s *Store) ensureNamespaceLoaded(ns string) {
 		return // schon im Speicher
 	}
 
-	// Jetzt exklusiv prüfen und laden
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if _, ok := s.data[ns]; ok {
-		return // anderer Goroutine war schneller
+	// Get or create a sync.Once for this namespace
+	s.onceMu.Lock()
+	once, exists := s.onceMap[ns]
+	if !exists {
+		once = &sync.Once{}
+		s.onceMap[ns] = once
 	}
+	s.onceMu.Unlock()
 
-	m, err := s.loadNamespace(ns)
-	if err != nil {
-		// Datei nicht gefunden → leerer Namespace
-		m = make(map[string]any)
-	}
-	s.data[ns] = m
+	// Use sync.Once to ensure the namespace is loaded exactly once
+	once.Do(func() {
+		// Load namespace from disk
+		m, err := s.loadNamespace(ns)
+		if err != nil {
+			// Datei nicht gefunden → leerer Namespace
+			m = make(map[string]any)
+		}
+
+		// Store the loaded data
+		s.mu.Lock()
+		s.data[ns] = m
+		s.mu.Unlock()
+	})
 }
 
 func (s *Store) saveNamespace(ns string) error {

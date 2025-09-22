@@ -76,7 +76,6 @@ func (s *DummySource) Start(ctx context.Context, out chan<- *types.Metric, grace
 				metric.AddTag("source", "dummy")
 				metric.AddField("value", 42)
 				out <- metric
-				slog.Debug("dummy source: generated metric", "timestamp", t, "value", 42)
 			}
 		}
 	}
