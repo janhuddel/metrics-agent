@@ -3,7 +3,6 @@ package dummy
 
 import (
 	"context"
-	"fmt"
 	"log/slog"
 	"os"
 	"time"
@@ -43,8 +42,8 @@ func (s *DummySource) Name() string {
 }
 
 // Start begins generating dummy metrics at the configured interval.
-// It sends temperature metrics in InfluxDB line protocol format.
-func (s *DummySource) Start(ctx context.Context, out chan<- string, gracefulShutdown <-chan struct{}, hardShutdown <-chan struct{}) error {
+// It sends structured temperature metrics.
+func (s *DummySource) Start(ctx context.Context, out chan<- *types.Metric, gracefulShutdown <-chan struct{}, hardShutdown <-chan struct{}) error {
 	// Use configured interval for measurements
 	ticker := time.NewTicker(s.interval)
 	defer ticker.Stop()
@@ -73,8 +72,10 @@ func (s *DummySource) Start(ctx context.Context, out chan<- string, gracefulShut
 			panic("Demo module panic triggered by /tmp/metrics-agent-panic-demo file")
 		case t := <-ticker.C:
 			if connected {
-				line := fmt.Sprintf("temperature,source=dummy value=42 %d", t.UnixNano())
-				out <- line
+				metric := types.NewMetric("temperature", s.Name(), t)
+				metric.AddTag("source", "dummy")
+				metric.AddField("value", 42)
+				out <- metric
 			}
 		}
 	}

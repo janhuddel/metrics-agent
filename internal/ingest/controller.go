@@ -37,7 +37,7 @@ func NewController(config *utils.AppConfig) (*Controller, error) {
 
 func (c *Controller) Start(sigChan chan os.Signal) {
 	// Shared channels
-	out := make(chan string, 100)
+	metricChan := make(chan *types.Metric, 100) // Channel for structured metrics
 	errs := make(chan error, 10)
 	gracefulShutdown := make(chan struct{}) // Graceful shutdown signal
 	hardShutdown := make(chan struct{})     // Hard shutdown signal
@@ -49,6 +49,14 @@ func (c *Controller) Start(sigChan chan os.Signal) {
 		MaxDelay:   c.config.Retry.MaxDelay,
 	}
 
+	// Start the metric writer
+	metricWriter := utils.NewLineProtocolWriter()
+	writerDone := make(chan struct{})
+	go func() {
+		defer close(writerDone)
+		metricWriter.Start(context.Background(), metricChan)
+	}()
+
 	var wg sync.WaitGroup
 	completionChan := make(chan struct{})
 
@@ -57,7 +65,7 @@ func (c *Controller) Start(sigChan chan os.Signal) {
 		wg.Add(1)
 		go func(source types.Ingester) {
 			defer wg.Done()
-			c.startIngester(context.Background(), ingester, out, gracefulShutdown, hardShutdown, retryCfg)
+			c.startIngester(context.Background(), ingester, metricChan, gracefulShutdown, hardShutdown, retryCfg)
 		}(ingester)
 		slog.Info("started ingester", "name", ingester.Name())
 	}
@@ -68,7 +76,7 @@ func (c *Controller) Start(sigChan chan os.Signal) {
 		close(completionChan)
 	}()
 
-	// Main loop: metrics to STDOUT, errors to STDERR, signal handling
+	// Main loop: signal handling and error processing
 	for {
 		select {
 		case sig := <-sigChan:
@@ -83,18 +91,29 @@ func (c *Controller) Start(sigChan chan os.Signal) {
 				case <-time.After(gracefulTimeout):
 					slog.Warn("graceful shutdown timeout exceeded, forcing hard shutdown")
 					close(hardShutdown)
+					// Stop the writer immediately for hard shutdown
+					metricWriter.Stop()
+					// Wait for writer to complete
+					<-writerDone
 					return
 				case <-completionChan:
 					slog.Info("all sources completed gracefully")
+					// Drain remaining metrics before stopping the writer
+					metricWriter.Drain(metricChan)
+					metricWriter.Stop()
+					// Wait for writer to complete
+					<-writerDone
 					return
 				}
 			case syscall.SIGINT:
 				slog.Info("received SIGINT, initiating hard shutdown")
 				close(hardShutdown)
+				// Stop the writer immediately for hard shutdown
+				metricWriter.Stop()
+				// Wait for writer to complete
+				<-writerDone
 				return
 			}
-		case line := <-out:
-			fmt.Println(line) // only metrics → STDOUT
 		case err := <-errs:
 			slog.Error("source error", "err", err)
 		}
@@ -104,7 +123,7 @@ func (c *Controller) Start(sigChan chan os.Signal) {
 func (c *Controller) startIngester(
 	ctx context.Context,
 	ingester types.Ingester,
-	out chan<- string,
+	out chan<- *types.Metric,
 	gracefulShutdown <-chan struct{},
 	hardShutdown <-chan struct{},
 	cfg types.RetryConfig) {

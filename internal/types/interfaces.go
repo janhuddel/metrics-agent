@@ -22,5 +22,5 @@ type Ingester interface {
 	// It should run until graceful or hard shutdown signal is received, or an error occurs.
 	// gracefulShutdown: allows time for cleanup (disconnect from services, close connections)
 	// hardShutdown: immediate termination, no cleanup time
-	Start(ctx context.Context, out chan<- string, gracefulShutdown <-chan struct{}, hardShutdown <-chan struct{}) error
+	Start(ctx context.Context, out chan<- *Metric, gracefulShutdown <-chan struct{}, hardShutdown <-chan struct{}) error
 }
