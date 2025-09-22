@@ -43,7 +43,7 @@ func NewController(config *utils.AppConfig) (*Controller, error) {
 		return nil, errors.New("no sources enabled")
 	}
 
-	slog.Info("controller initialized", "ingester_count", len(ingesters))
+	slog.Debug("controller initialized", "ingester_count", len(ingesters))
 	return &Controller{
 		config:       config,
 		ingesters:    ingesters,
@@ -85,7 +85,7 @@ func (c *Controller) Start(ctx context.Context, sigChan <-chan os.Signal) error 
 			defer wg.Done()
 			c.runIngester(ingesterCtx, ing, metricChan, errorChan)
 		}(ingester)
-		slog.Info("started ingester", "name", ingester.Name())
+		slog.Debug("started ingester", "name", ingester.Name())
 	}
 
 	// Monitor ingester completion
@@ -130,11 +130,11 @@ func (c *Controller) eventLoop(
 			}
 
 		case <-ingesterDone:
-			slog.Info("all ingesters completed")
+			slog.Debug("all ingesters completed")
 			return c.handleGracefulShutdown(metricWriter, metricChan, ingesterDone, writerDone, 0)
 
 		case <-ctx.Done():
-			slog.Info("context cancelled, initiating shutdown")
+			slog.Debug("context cancelled, initiating shutdown")
 			return c.handleHardShutdown(metricWriter, writerDone)
 		}
 	}
@@ -158,7 +158,7 @@ func (c *Controller) runIngester(
 	for {
 		// Check for shutdown before starting
 		if atomic.LoadInt32(&c.hardShutdown) == 1 {
-			slog.Info("hard shutdown in progress, stopping ingester", "name", ingester.Name())
+			slog.Debug("hard shutdown in progress, stopping ingester", "name", ingester.Name())
 			return
 		}
 
@@ -167,12 +167,12 @@ func (c *Controller) runIngester(
 
 		// Handle different exit conditions
 		if err == nil {
-			slog.Info("ingester completed successfully", "name", ingester.Name())
+			slog.Debug("ingester completed successfully", "name", ingester.Name())
 			return
 		}
 
 		if errors.Is(err, context.Canceled) || ctx.Err() != nil {
-			slog.Info("ingester stopped due to context cancellation", "name", ingester.Name())
+			slog.Debug("ingester stopped due to context cancellation", "name", ingester.Name())
 			return
 		}
 
@@ -209,7 +209,7 @@ func (c *Controller) runIngester(
 		case <-time.After(backoff):
 			// Continue retry loop
 		case <-ctx.Done():
-			slog.Info("context cancelled during backoff", "name", ingester.Name())
+			slog.Debug("context cancelled during backoff", "name", ingester.Name())
 			return
 		}
 	}
@@ -275,7 +275,7 @@ func (c *Controller) handleGracefulShutdown(
 	if timeout > 0 {
 		select {
 		case <-ingesterDone:
-			slog.Info("all ingesters completed gracefully")
+			slog.Debug("all ingesters completed gracefully")
 		case <-time.After(timeout):
 			slog.Warn("graceful shutdown timeout exceeded, forcing hard shutdown")
 			atomic.StoreInt32(&c.hardShutdown, 1)

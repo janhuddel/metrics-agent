@@ -54,19 +54,19 @@ func (s *DummySource) Start(ctx context.Context, out chan<- *types.Metric, grace
 
 	// Simulate connection to external service (e.g., MQTT)
 	connected := true
-	slog.Info("dummy source: connected to external service")
+	slog.Debug("dummy source: connected to external service")
 
 	for {
 		select {
 		case <-gracefulShutdown:
-			slog.Info("dummy source: received graceful shutdown, disconnecting from service...")
+			slog.Debug("dummy source: received graceful shutdown, disconnecting from service...")
 			// Simulate cleanup time (disconnect from MQTT, close connections, etc.)
 			time.Sleep(2 * time.Second)
 			connected = false
-			slog.Info("dummy source: gracefully disconnected from service")
+			slog.Debug("dummy source: gracefully disconnected from service")
 			return nil
 		case <-hardShutdown:
-			slog.Info("dummy source: received hard shutdown, terminating immediately")
+			slog.Debug("dummy source: received hard shutdown, terminating immediately")
 			return nil
 		case <-panicChan:
 			panic("Demo module panic triggered by /tmp/metrics-agent-panic-demo file")
@@ -76,6 +76,7 @@ func (s *DummySource) Start(ctx context.Context, out chan<- *types.Metric, grace
 				metric.AddTag("source", "dummy")
 				metric.AddField("value", 42)
 				out <- metric
+				slog.Debug("dummy source: generated metric", "timestamp", t, "value", 42)
 			}
 		}
 	}

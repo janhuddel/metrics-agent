@@ -42,16 +42,16 @@ func NewLineProtocolWriter() *LineProtocolWriter {
 
 // Start begins processing metrics and converting them to line protocol format.
 func (w *LineProtocolWriter) Start(ctx context.Context, metricChan <-chan *types.Metric) {
-	slog.Info("metric writer started")
-	defer slog.Info("metric writer stopped")
+	slog.Debug("metric writer started")
+	defer slog.Debug("metric writer stopped")
 
 	for {
 		select {
 		case <-w.stopChan:
-			slog.Info("metric writer: received stop signal")
+			slog.Debug("metric writer: received stop signal")
 			return
 		case <-ctx.Done():
-			slog.Info("metric writer: context canceled")
+			slog.Debug("metric writer: context canceled")
 			return
 		case metric := <-metricChan:
 			if metric != nil {
@@ -66,7 +66,7 @@ func (w *LineProtocolWriter) Start(ctx context.Context, metricChan <-chan *types
 
 // Drain processes any remaining metrics in the channel during graceful shutdown.
 func (w *LineProtocolWriter) Drain(metricChan <-chan *types.Metric) {
-	slog.Info("metric writer: draining remaining metrics...")
+	slog.Debug("metric writer: draining remaining metrics...")
 	for {
 		select {
 		case metric := <-metricChan:
@@ -78,7 +78,7 @@ func (w *LineProtocolWriter) Drain(metricChan <-chan *types.Metric) {
 			}
 		default:
 			// No more metrics to process
-			slog.Info("metric writer: finished draining metrics")
+			slog.Debug("metric writer: finished draining metrics")
 			return
 		}
 	}
