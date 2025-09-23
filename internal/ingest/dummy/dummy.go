@@ -19,7 +19,7 @@ type DummySource struct {
 
 // CreateInstance creates a new DummySource instance with the provided configuration.
 // This function is used by the registry system.
-func CreateInstance(config map[string]interface{}, store *utils.Store) types.Ingester {
+func CreateInstance(config map[string]any, store *utils.Store) types.Ingester {
 	interval := 5 * time.Second // default interval
 	store.Set("dummy", "interval", interval)
 

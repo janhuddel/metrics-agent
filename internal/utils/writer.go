@@ -162,7 +162,7 @@ func escapeFieldKey(key string) string {
 }
 
 // formatFieldValue formats a field value according to InfluxDB line protocol rules.
-func formatFieldValue(value interface{}) string {
+func formatFieldValue(value any) string {
 	switch v := value.(type) {
 	case string:
 		return fmt.Sprintf("\"%s\"", strings.ReplaceAll(v, "\"", "\\\""))

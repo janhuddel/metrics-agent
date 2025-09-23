@@ -24,6 +24,7 @@ type MockIngester struct {
 	started        bool
 	stopped        bool
 	metricsSent    int
+	shutdownOrder  []string // Track shutdown order for testing
 }
 
 // NewMockIngester creates a new mock ingester for testing
@@ -32,6 +33,7 @@ func NewMockIngester(name string) *MockIngester {
 		name:           name,
 		metricInterval: 100 * time.Millisecond,
 		cleanupTime:    50 * time.Millisecond,
+		shutdownOrder:  make([]string, 0),
 	}
 }
 
@@ -108,10 +110,21 @@ func (m *MockIngester) Start(ctx context.Context, out chan<- *types.Metric, grac
 	for {
 		select {
 		case <-gracefulShutdown:
+			// Track shutdown order
+			m.mu.Lock()
+			m.shutdownOrder = append(m.shutdownOrder, "graceful_shutdown_received")
+			m.mu.Unlock()
 			// Simulate cleanup time
 			time.Sleep(m.cleanupTime)
+			m.mu.Lock()
+			m.shutdownOrder = append(m.shutdownOrder, "graceful_shutdown_completed")
+			m.mu.Unlock()
 			return nil
 		case <-hardShutdown:
+			// Track shutdown order
+			m.mu.Lock()
+			m.shutdownOrder = append(m.shutdownOrder, "hard_shutdown_received")
+			m.mu.Unlock()
 			return nil
 		case <-ctx.Done():
 			return ctx.Err()
@@ -126,9 +139,18 @@ func (m *MockIngester) Start(ctx context.Context, out chan<- *types.Metric, grac
 					m.metricsSent = metricsSent
 					m.mu.Unlock()
 				case <-gracefulShutdown:
+					m.mu.Lock()
+					m.shutdownOrder = append(m.shutdownOrder, "graceful_shutdown_received")
+					m.mu.Unlock()
 					time.Sleep(m.cleanupTime)
+					m.mu.Lock()
+					m.shutdownOrder = append(m.shutdownOrder, "graceful_shutdown_completed")
+					m.mu.Unlock()
 					return nil
 				case <-hardShutdown:
+					m.mu.Lock()
+					m.shutdownOrder = append(m.shutdownOrder, "hard_shutdown_received")
+					m.mu.Unlock()
 					return nil
 				}
 			}
@@ -165,8 +187,18 @@ func (m *MockIngester) MetricsSent() int {
 	return m.metricsSent
 }
 
+// GetShutdownOrder returns the shutdown order events
+func (m *MockIngester) GetShutdownOrder() []string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	// Return a copy to avoid race conditions
+	result := make([]string, len(m.shutdownOrder))
+	copy(result, m.shutdownOrder)
+	return result
+}
+
 // MockIngesterCreator creates a mock ingester for testing
-func MockIngesterCreator(config map[string]interface{}, store *utils.Store) types.Ingester {
+func MockIngesterCreator(config map[string]any, store *utils.Store) types.Ingester {
 	name := "mock"
 	if nameVal, ok := config["name"].(string); ok {
 		name = nameVal

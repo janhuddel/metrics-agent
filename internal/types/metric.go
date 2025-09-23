@@ -13,7 +13,7 @@ type Metric struct {
 	Tags map[string]string
 
 	// Fields are the actual metric values
-	Fields map[string]interface{}
+	Fields map[string]any
 
 	// Timestamp is when the metric was collected
 	Timestamp time.Time
@@ -29,7 +29,7 @@ func NewMetric(name, source string, timestamp time.Time) *Metric {
 		Source:    source,
 		Timestamp: timestamp,
 		Tags:      make(map[string]string),
-		Fields:    make(map[string]interface{}),
+		Fields:    make(map[string]any),
 	}
 }
 
@@ -39,6 +39,6 @@ func (m *Metric) AddTag(key, value string) {
 }
 
 // AddField adds a field to the metric.
-func (m *Metric) AddField(key string, value interface{}) {
+func (m *Metric) AddField(key string, value any) {
 	m.Fields[key] = value
 }

@@ -26,8 +26,15 @@ func createTestConfig(t *testing.T) (*utils.AppConfig, func()) {
 		}{
 			Path: tempDir,
 		},
-		Sources: map[string]interface{}{
-			"mock": map[string]interface{}{
+		Controller: struct {
+			GracefulShutdownTimeout time.Duration `koanf:"graceful_shutdown_timeout"`
+			HardShutdownTimeout     time.Duration `koanf:"hard_shutdown_timeout"`
+		}{
+			GracefulShutdownTimeout: 30 * time.Second,
+			HardShutdownTimeout:     5 * time.Second,
+		},
+		Sources: map[string]any{
+			"mock": map[string]any{
 				"enabled": true,
 				"name":    "test_mock",
 			},
@@ -65,12 +72,19 @@ func createTestConfigWithMultipleSources(t *testing.T) (*utils.AppConfig, func()
 		}{
 			Path: tempDir,
 		},
-		Sources: map[string]interface{}{
-			"mock1": map[string]interface{}{
+		Controller: struct {
+			GracefulShutdownTimeout time.Duration `koanf:"graceful_shutdown_timeout"`
+			HardShutdownTimeout     time.Duration `koanf:"hard_shutdown_timeout"`
+		}{
+			GracefulShutdownTimeout: 30 * time.Second,
+			HardShutdownTimeout:     5 * time.Second,
+		},
+		Sources: map[string]any{
+			"mock1": map[string]any{
 				"enabled": true,
 				"name":    "test_mock_1",
 			},
-			"mock2": map[string]interface{}{
+			"mock2": map[string]any{
 				"enabled": true,
 				"name":    "test_mock_2",
 			},
@@ -105,8 +119,8 @@ func TestNewController(t *testing.T) {
 		{
 			name: "valid_config_with_enabled_sources",
 			config: &utils.AppConfig{
-				Sources: map[string]interface{}{
-					"mock": map[string]interface{}{
+				Sources: map[string]any{
+					"mock": map[string]any{
 						"enabled": true,
 						"name":    "test_mock",
 					},
@@ -127,8 +141,8 @@ func TestNewController(t *testing.T) {
 		{
 			name: "no_enabled_sources",
 			config: &utils.AppConfig{
-				Sources: map[string]interface{}{
-					"mock": map[string]interface{}{
+				Sources: map[string]any{
+					"mock": map[string]any{
 						"enabled": false,
 					},
 				},
@@ -148,7 +162,7 @@ func TestNewController(t *testing.T) {
 		{
 			name: "empty_sources_config",
 			config: &utils.AppConfig{
-				Sources: map[string]interface{}{},
+				Sources: map[string]any{},
 				Retry: struct {
 					MaxRetries int           `koanf:"max_retries"`
 					BaseDelay  time.Duration `koanf:"base_delay"`
@@ -354,7 +368,7 @@ func TestControllerStart_IngesterRetry(t *testing.T) {
 
 	// Register mock ingester
 	registry := NewRegistry()
-	registry.Register("mock", func(config map[string]interface{}, store *utils.Store) types.Ingester {
+	registry.Register("mock", func(config map[string]any, store *utils.Store) types.Ingester {
 		return mockIngester
 	})
 
@@ -422,7 +436,7 @@ func TestControllerStart_IngesterPanic(t *testing.T) {
 
 	// Register mock ingester
 	registry := NewRegistry()
-	registry.Register("mock", func(config map[string]interface{}, store *utils.Store) types.Ingester {
+	registry.Register("mock", func(config map[string]any, store *utils.Store) types.Ingester {
 		return mockIngester
 	})
 
@@ -485,7 +499,7 @@ func TestControllerStart_GracefulShutdownTimeout(t *testing.T) {
 
 	// Register mock ingester
 	registry := NewRegistry()
-	registry.Register("mock", func(config map[string]interface{}, store *utils.Store) types.Ingester {
+	registry.Register("mock", func(config map[string]any, store *utils.Store) types.Ingester {
 		return mockIngester
 	})
 
@@ -549,10 +563,10 @@ func TestControllerStart_ConcurrentIngesters(t *testing.T) {
 
 	// Register mock ingesters
 	registry := NewRegistry()
-	registry.Register("mock1", func(config map[string]interface{}, store *utils.Store) types.Ingester {
+	registry.Register("mock1", func(config map[string]any, store *utils.Store) types.Ingester {
 		return mockIngester1
 	})
-	registry.Register("mock2", func(config map[string]interface{}, store *utils.Store) types.Ingester {
+	registry.Register("mock2", func(config map[string]any, store *utils.Store) types.Ingester {
 		return mockIngester2
 	})
 
@@ -629,7 +643,7 @@ func TestControllerStart_MetricChannel(t *testing.T) {
 
 	// Register mock ingester
 	registry := NewRegistry()
-	registry.Register("mock", func(config map[string]interface{}, store *utils.Store) types.Ingester {
+	registry.Register("mock", func(config map[string]any, store *utils.Store) types.Ingester {
 		return mockIngester
 	})
 
@@ -688,16 +702,16 @@ func TestControllerStart_MetricChannel(t *testing.T) {
 func TestGetEnabledSources(t *testing.T) {
 	// Create test configuration
 	config := &utils.AppConfig{
-		Sources: map[string]interface{}{
-			"mock1": map[string]interface{}{
+		Sources: map[string]any{
+			"mock1": map[string]any{
 				"enabled": true,
 				"name":    "test_mock_1",
 			},
-			"mock2": map[string]interface{}{
+			"mock2": map[string]any{
 				"enabled": false,
 				"name":    "test_mock_2",
 			},
-			"mock3": map[string]interface{}{
+			"mock3": map[string]any{
 				"enabled": true,
 				"name":    "test_mock_3",
 			},
@@ -765,7 +779,7 @@ func TestControllerStart_ContextCancellation(t *testing.T) {
 
 	// Register mock ingester
 	registry := NewRegistry()
-	registry.Register("mock", func(config map[string]interface{}, store *utils.Store) types.Ingester {
+	registry.Register("mock", func(config map[string]any, store *utils.Store) types.Ingester {
 		return mockIngester
 	})
 
@@ -817,6 +831,338 @@ func TestControllerStart_ContextCancellation(t *testing.T) {
 	}
 }
 
+// TestControllerStart_ShutdownOrder_SIGTERM tests that graceful shutdown follows correct order
+func TestControllerStart_ShutdownOrder_SIGTERM(t *testing.T) {
+	// Create test configuration with temporary storage
+	config, cleanup := createTestConfig(t)
+	defer cleanup()
+
+	// Create mock ingesters with different cleanup times to test order
+	mockIngester1 := NewMockIngester("test_mock_1").WithCleanupTime(100 * time.Millisecond)
+	mockIngester2 := NewMockIngester("test_mock_2").WithCleanupTime(50 * time.Millisecond)
+
+	// Register mock ingesters
+	registry := NewRegistry()
+	registry.Register("mock1", func(config map[string]any, store *utils.Store) types.Ingester {
+		return mockIngester1
+	})
+	registry.Register("mock2", func(config map[string]any, store *utils.Store) types.Ingester {
+		return mockIngester2
+	})
+
+	// Update config to have multiple sources
+	config.Sources = map[string]any{
+		"mock1": map[string]any{
+			"enabled": true,
+			"name":    "test_mock_1",
+		},
+		"mock2": map[string]any{
+			"enabled": true,
+			"name":    "test_mock_2",
+		},
+	}
+
+	// Temporarily replace the global registry
+	originalRegistry := SourceRegistry
+	SourceRegistry = registry
+	defer func() {
+		SourceRegistry = originalRegistry
+	}()
+
+	controller, err := NewController(config)
+	if err != nil {
+		t.Fatalf("Failed to create controller: %v", err)
+	}
+
+	// Create signal channel
+	sigChan := make(chan os.Signal, 1)
+
+	// Start controller in a goroutine
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		controller.Start(context.Background(), sigChan)
+	}()
+
+	// Wait a bit for controller to start
+	time.Sleep(100 * time.Millisecond)
+
+	// Send SIGTERM signal
+	sigChan <- syscall.SIGTERM
+
+	// Wait for controller to finish
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		// Verify both ingesters received graceful shutdown
+		order1 := mockIngester1.GetShutdownOrder()
+		order2 := mockIngester2.GetShutdownOrder()
+
+		// Both should have received graceful shutdown
+		if len(order1) == 0 || order1[0] != "graceful_shutdown_received" {
+			t.Errorf("Mock ingester 1 did not receive graceful shutdown. Order: %v", order1)
+		}
+		if len(order2) == 0 || order2[0] != "graceful_shutdown_received" {
+			t.Errorf("Mock ingester 2 did not receive graceful shutdown. Order: %v", order2)
+		}
+
+		// Both should have completed graceful shutdown
+		if len(order1) < 2 || order1[1] != "graceful_shutdown_completed" {
+			t.Errorf("Mock ingester 1 did not complete graceful shutdown. Order: %v", order1)
+		}
+		if len(order2) < 2 || order2[1] != "graceful_shutdown_completed" {
+			t.Errorf("Mock ingester 2 did not complete graceful shutdown. Order: %v", order2)
+		}
+
+		// Clean up the store directory
+		if controller.store != nil {
+			controller.store.Cleanup()
+		}
+	case <-time.After(5 * time.Second):
+		t.Error("Controller did not finish within timeout")
+	}
+}
+
+// TestControllerStart_ShutdownOrder_SIGINT tests that hard shutdown follows correct order
+func TestControllerStart_ShutdownOrder_SIGINT(t *testing.T) {
+	// Create test configuration with temporary storage
+	config, cleanup := createTestConfig(t)
+	defer cleanup()
+
+	// Create mock ingesters
+	mockIngester1 := NewMockIngester("test_mock_1")
+	mockIngester2 := NewMockIngester("test_mock_2")
+
+	// Register mock ingesters
+	registry := NewRegistry()
+	registry.Register("mock1", func(config map[string]any, store *utils.Store) types.Ingester {
+		return mockIngester1
+	})
+	registry.Register("mock2", func(config map[string]any, store *utils.Store) types.Ingester {
+		return mockIngester2
+	})
+
+	// Update config to have multiple sources
+	config.Sources = map[string]any{
+		"mock1": map[string]any{
+			"enabled": true,
+			"name":    "test_mock_1",
+		},
+		"mock2": map[string]any{
+			"enabled": true,
+			"name":    "test_mock_2",
+		},
+	}
+
+	// Temporarily replace the global registry
+	originalRegistry := SourceRegistry
+	SourceRegistry = registry
+	defer func() {
+		SourceRegistry = originalRegistry
+	}()
+
+	controller, err := NewController(config)
+	if err != nil {
+		t.Fatalf("Failed to create controller: %v", err)
+	}
+
+	// Create signal channel
+	sigChan := make(chan os.Signal, 1)
+
+	// Start controller in a goroutine
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		controller.Start(context.Background(), sigChan)
+	}()
+
+	// Wait a bit for controller to start
+	time.Sleep(100 * time.Millisecond)
+
+	// Send SIGINT signal
+	sigChan <- syscall.SIGINT
+
+	// Wait for controller to finish
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		// Verify both ingesters received hard shutdown
+		order1 := mockIngester1.GetShutdownOrder()
+		order2 := mockIngester2.GetShutdownOrder()
+
+		// Both should have received hard shutdown
+		if len(order1) == 0 || order1[0] != "hard_shutdown_received" {
+			t.Errorf("Mock ingester 1 did not receive hard shutdown. Order: %v", order1)
+		}
+		if len(order2) == 0 || order2[0] != "hard_shutdown_received" {
+			t.Errorf("Mock ingester 2 did not receive hard shutdown. Order: %v", order2)
+		}
+
+		// Clean up the store directory
+		if controller.store != nil {
+			controller.store.Cleanup()
+		}
+	case <-time.After(5 * time.Second):
+		t.Error("Controller did not finish within timeout")
+	}
+}
+
+// TestControllerStart_HardShutdownTimeout tests hard shutdown timeout behavior
+func TestControllerStart_HardShutdownTimeout(t *testing.T) {
+	// Create test configuration with temporary storage and short hard shutdown timeout
+	config, cleanup := createTestConfig(t)
+	defer cleanup()
+
+	// Set a very short hard shutdown timeout
+	config.Controller.HardShutdownTimeout = 100 * time.Millisecond
+
+	// Create a mock ingester that takes longer to shutdown than the timeout
+	mockIngester := NewMockIngester("test_mock").WithCleanupTime(200 * time.Millisecond)
+
+	// Register mock ingester
+	registry := NewRegistry()
+	registry.Register("mock", func(config map[string]any, store *utils.Store) types.Ingester {
+		return mockIngester
+	})
+
+	// Temporarily replace the global registry
+	originalRegistry := SourceRegistry
+	SourceRegistry = registry
+	defer func() {
+		SourceRegistry = originalRegistry
+	}()
+
+	controller, err := NewController(config)
+	if err != nil {
+		t.Fatalf("Failed to create controller: %v", err)
+	}
+
+	// Create signal channel
+	sigChan := make(chan os.Signal, 1)
+
+	// Start controller in a goroutine
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		controller.Start(context.Background(), sigChan)
+	}()
+
+	// Wait a bit for controller to start
+	time.Sleep(100 * time.Millisecond)
+
+	// Send SIGINT signal
+	sigChan <- syscall.SIGINT
+
+	// Wait for controller to finish
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		// Controller should finish even if ingester doesn't complete within timeout
+		// The ingester should have received hard shutdown signal
+		order := mockIngester.GetShutdownOrder()
+		if len(order) == 0 || order[0] != "hard_shutdown_received" {
+			t.Errorf("Mock ingester did not receive hard shutdown. Order: %v", order)
+		}
+
+		// Clean up the store directory
+		if controller.store != nil {
+			controller.store.Cleanup()
+		}
+	case <-time.After(5 * time.Second):
+		t.Error("Controller did not finish within timeout")
+	}
+}
+
+// TestControllerStart_GracefulShutdownTimeout_Updated tests graceful shutdown timeout with configurable timeout
+func TestControllerStart_GracefulShutdownTimeout_Updated(t *testing.T) {
+	// Create test configuration with temporary storage
+	config, cleanup := createTestConfig(t)
+	defer cleanup()
+
+	// Set a short graceful shutdown timeout
+	config.Controller.GracefulShutdownTimeout = 100 * time.Millisecond
+
+	// Create a mock ingester with long cleanup time to trigger timeout
+	mockIngester := NewMockIngester("test_mock").WithCleanupTime(200 * time.Millisecond)
+
+	// Register mock ingester
+	registry := NewRegistry()
+	registry.Register("mock", func(config map[string]any, store *utils.Store) types.Ingester {
+		return mockIngester
+	})
+
+	// Temporarily replace the global registry
+	originalRegistry := SourceRegistry
+	SourceRegistry = registry
+	defer func() {
+		SourceRegistry = originalRegistry
+	}()
+
+	controller, err := NewController(config)
+	if err != nil {
+		t.Fatalf("Failed to create controller: %v", err)
+	}
+
+	// Create signal channel
+	sigChan := make(chan os.Signal, 1)
+
+	// Start controller in a goroutine
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		controller.Start(context.Background(), sigChan)
+	}()
+
+	// Wait a bit for controller to start
+	time.Sleep(100 * time.Millisecond)
+
+	// Send SIGTERM signal
+	sigChan <- syscall.SIGTERM
+
+	// Wait for controller to finish (should timeout and force hard shutdown)
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		// Controller finished successfully
+		// The ingester should have received graceful shutdown signal first
+		order := mockIngester.GetShutdownOrder()
+		if len(order) == 0 || order[0] != "graceful_shutdown_received" {
+			t.Errorf("Mock ingester did not receive graceful shutdown. Order: %v", order)
+		}
+
+		// Clean up the store directory
+		if controller.store != nil {
+			controller.store.Cleanup()
+		}
+	case <-time.After(5 * time.Second):
+		t.Error("Controller did not finish within timeout")
+	}
+}
+
 // BenchmarkControllerStart benchmarks the controller start performance
 func BenchmarkControllerStart(b *testing.B) {
 	// Create temporary directory for benchmark storage
@@ -832,8 +1178,8 @@ func BenchmarkControllerStart(b *testing.B) {
 		}{
 			Path: tempDir,
 		},
-		Sources: map[string]interface{}{
-			"mock": map[string]interface{}{
+		Sources: map[string]any{
+			"mock": map[string]any{
 				"enabled": true,
 				"name":    "test_mock",
 			},

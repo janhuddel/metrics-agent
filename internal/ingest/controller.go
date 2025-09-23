@@ -30,9 +30,10 @@ type Controller struct {
 	ingesters []types.Ingester
 
 	// Shutdown state management
-	shutdownOnce sync.Once
-	shutdownChan chan struct{}
-	hardShutdown int32 // atomic flag for hard shutdown
+	shutdownOnce     sync.Once
+	shutdownChan     chan struct{}
+	hardShutdown     int32         // atomic flag for hard shutdown
+	hardShutdownChan chan struct{} // channel to signal hard shutdown to ingesters
 }
 
 // NewController creates a new controller instance with proper initialization
@@ -45,10 +46,11 @@ func NewController(config *utils.AppConfig) (*Controller, error) {
 
 	slog.Debug("controller initialized", "ingester_count", len(ingesters))
 	return &Controller{
-		config:       config,
-		ingesters:    ingesters,
-		store:        store,
-		shutdownChan: make(chan struct{}),
+		config:           config,
+		ingesters:        ingesters,
+		store:            store,
+		shutdownChan:     make(chan struct{}),
+		hardShutdownChan: make(chan struct{}),
 	}, nil
 }
 
@@ -108,34 +110,31 @@ func (c *Controller) eventLoop(
 	ingesterDone chan struct{},
 	writerDone chan struct{},
 ) error {
-
-	gracefulTimeout := 30 * time.Second
-
 	for {
 		select {
 		case sig := <-sigChan:
 			switch sig {
 			case syscall.SIGTERM:
 				slog.Info("received SIGTERM, initiating graceful shutdown")
-				return c.handleGracefulShutdown(metricWriter, metricChan, ingesterDone, writerDone, gracefulTimeout)
+				return c.handleGracefulShutdown(metricWriter, metricChan, ingesterDone, writerDone)
 			case syscall.SIGINT:
 				slog.Info("received SIGINT, initiating hard shutdown")
-				return c.handleHardShutdown(metricWriter, writerDone)
+				return c.handleHardShutdown(metricWriter, ingesterDone, writerDone)
 			}
 
 		case err := <-errorChan:
 			if err := c.handleIngesterError(err); err != nil {
 				slog.Error("critical ingester error, initiating shutdown", "error", err)
-				return c.handleHardShutdown(metricWriter, writerDone)
+				return c.handleHardShutdown(metricWriter, ingesterDone, writerDone)
 			}
 
 		case <-ingesterDone:
 			slog.Debug("all ingesters completed")
-			return c.handleGracefulShutdown(metricWriter, metricChan, ingesterDone, writerDone, 0)
+			return c.handleGracefulShutdown(metricWriter, metricChan, ingesterDone, writerDone)
 
 		case <-ctx.Done():
 			slog.Debug("context cancelled, initiating shutdown")
-			return c.handleHardShutdown(metricWriter, writerDone)
+			return c.handleHardShutdown(metricWriter, ingesterDone, writerDone)
 		}
 	}
 }
@@ -236,6 +235,8 @@ func (c *Controller) runIngesterWithPanicProtection(
 		select {
 		case <-c.shutdownChan:
 			close(gracefulShutdown)
+		case <-c.hardShutdownChan:
+			close(hardShutdown)
 		case <-ctx.Done():
 			close(hardShutdown)
 		}
@@ -262,7 +263,6 @@ func (c *Controller) handleGracefulShutdown(
 	metricChan chan *types.Metric,
 	ingesterDone chan struct{},
 	writerDone chan struct{},
-	timeout time.Duration,
 ) error {
 	slog.Info("initiating graceful shutdown")
 
@@ -270,6 +270,8 @@ func (c *Controller) handleGracefulShutdown(
 	c.shutdownOnce.Do(func() {
 		close(c.shutdownChan)
 	})
+
+	timeout := c.config.Controller.GracefulShutdownTimeout
 
 	// Wait for ingesters to complete or timeout
 	if timeout > 0 {
@@ -298,6 +300,7 @@ func (c *Controller) handleGracefulShutdown(
 // handleHardShutdown performs immediate shutdown
 func (c *Controller) handleHardShutdown(
 	metricWriter utils.MetricWriter,
+	ingesterDone chan struct{},
 	writerDone chan struct{},
 ) error {
 	slog.Info("initiating hard shutdown")
@@ -305,7 +308,22 @@ func (c *Controller) handleHardShutdown(
 	// Signal hard shutdown immediately
 	atomic.StoreInt32(&c.hardShutdown, 1)
 
-	// Stop writer immediately
+	// Signal hard shutdown to all ingesters
+	c.shutdownOnce.Do(func() {
+		close(c.hardShutdownChan)
+	})
+
+	timeout := c.config.Controller.HardShutdownTimeout
+
+	// Wait for ingesters to complete (with a short timeout for hard shutdown)
+	select {
+	case <-ingesterDone:
+		slog.Debug("all ingesters completed during hard shutdown")
+	case <-time.After(timeout):
+		slog.Warn("hard shutdown timeout exceeded, forcing writer stop")
+	}
+
+	// Stop writer after ingesters are done
 	metricWriter.Stop()
 	<-writerDone
 

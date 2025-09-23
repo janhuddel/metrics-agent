@@ -15,10 +15,14 @@ type AppConfig struct {
 	Logging struct {
 		Level string `koanf:"level"`
 	} `koanf:"logging"`
+	Controller struct {
+		GracefulShutdownTimeout time.Duration `koanf:"graceful_shutdown_timeout"`
+		HardShutdownTimeout     time.Duration `koanf:"hard_shutdown_timeout"`
+	} `koanf:"controller"`
 	Storage struct {
 		Path string `koanf:"path"`
 	} `koanf:"storage"`
-	Sources map[string]interface{} `koanf:"sources"`
+	Sources map[string]any `koanf:"sources"`
 	Retry   struct {
 		MaxRetries int           `koanf:"max_retries"`
 		BaseDelay  time.Duration `koanf:"base_delay"`
@@ -67,18 +71,18 @@ func LoadConfig() (*AppConfig, error) {
 }
 
 // GetSourceConfig returns the configuration for a specific source as a map
-func (c *AppConfig) GetSourceConfig(sourceName string) map[string]interface{} {
+func (c *AppConfig) GetSourceConfig(sourceName string) map[string]any {
 	if c.Sources == nil {
-		return make(map[string]interface{})
+		return make(map[string]any)
 	}
 
 	if sourceConfig, exists := c.Sources[sourceName]; exists {
-		if configMap, ok := sourceConfig.(map[string]interface{}); ok {
+		if configMap, ok := sourceConfig.(map[string]any); ok {
 			return configMap
 		}
 	}
 
-	return make(map[string]interface{})
+	return make(map[string]any)
 }
 
 // IsSourceEnabled checks if a source is enabled in the configuration

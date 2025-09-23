@@ -5,6 +5,11 @@
 logging:
   level: info
 
+# Controller configuration
+controller:
+  graceful_shutdown_timeout: 30s
+  hard_shutdown_timeout: 5s
+  
 # Storage configuration
 storage:
   path: ./.data
